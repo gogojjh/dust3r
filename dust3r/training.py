@@ -34,7 +34,7 @@ from dust3r.inference import loss_of_one_batch  # noqa
 import dust3r.utils.path_to_croco  # noqa: F401
 import croco.utils.misc as misc  # noqa
 from croco.utils.misc import NativeScalerWithGradNormCount as NativeScaler  # noqa
-
+from lora import inject_lora
 
 def get_args_parser():
     parser = argparse.ArgumentParser('DUST3R training', add_help=False)
@@ -132,6 +132,25 @@ def train(args):
     test_criterion = eval(args.test_criterion or args.criterion).to(device)
 
     model.to(device)
+    
+    ######################################### LoRA
+    for name, layer in model.named_modules():
+        print("name: ", name)
+        print("layer: ", layer.__class__.__name__)
+        name_cols=name.split('.')
+        # 过滤出cross attention使用的linear权重
+        filter_names=['qkv']
+        if any(n in name_cols for n in filter_names) and layer.__class__.__name__ == 'Linear':
+            inject_lora(model, name, layer)
+            print("inject layer: ", layer.__class__.__name__)
+    
+    for name, param in model.named_parameters():
+        if name.split('.')[-1] not in ['lora_a','lora_b']:  # 非Lora部分不计算梯度
+            param.requires_grad = False
+        else:
+            param.requires_grad = True
+    #########################################
+
     model_without_ddp = model
     print("Model = %s" % str(model_without_ddp))
 
@@ -191,12 +210,22 @@ def train(args):
     start_time = time.time()
     train_stats = test_stats = {}
     for epoch in range(args.start_epoch, args.epochs + 1):
-
         # Save immediately the last checkpoint
         if epoch > args.start_epoch:
             if args.save_freq and epoch % args.save_freq == 0 or epoch == args.epochs:
                 save_model(epoch - 1, 'last', best_so_far)
-
+                
+                ######################################### LoRA
+                lora_state={}
+                for name, param in model.named_parameters():
+                    name_cols=name.split('.')
+                    filter_names=['lora_a','lora_b']
+                    if any(n==name_cols[-1] for n in filter_names):
+                        lora_state[name]=param
+                torch.save(lora_state, 'lora.pt.tmp')
+                os.replace('lora.pt.tmp', 'lora.pt')
+                #########################################
+                
         # Test on multiple datasets
         new_best = False
         if (epoch > 0 and args.eval_freq > 0 and epoch % args.eval_freq == 0):
