@@ -4,7 +4,12 @@
 # --------------------------------------------------------
 # Initialization functions for global alignment
 # --------------------------------------------------------
-from functools import cache
+# NOTE(gogojjh): Compatible with Python3.8
+import sys
+if sys.version_info >= (3, 9):
+    from functools import cache
+else:
+    from functools import lru_cache as cache
 
 import numpy as np
 import scipy.sparse as sp
