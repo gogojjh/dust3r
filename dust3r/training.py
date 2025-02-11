@@ -34,7 +34,7 @@ from dust3r.inference import loss_of_one_batch  # noqa
 import dust3r.utils.path_to_croco  # noqa: F401
 import croco.utils.misc as misc  # noqa
 from croco.utils.misc import NativeScalerWithGradNormCount as NativeScaler  # noqa
-from lora import inject_lora
+from dust3r.lora import inject_lora
 
 def get_args_parser():
     parser = argparse.ArgumentParser('DUST3R training', add_help=False)
@@ -136,13 +136,12 @@ def train(args):
     ######################################### LoRA
     for name, layer in model.named_modules():
         print("name: ", name)
-        print("layer: ", layer.__class__.__name__)
-        name_cols=name.split('.')
-        # 过滤出cross attention使用的linear权重
-        filter_names=['qkv']
-        if any(n in name_cols for n in filter_names) and layer.__class__.__name__ == 'Linear':
+        name_cols = name.split('.')
+        # Retrieve all linear layer in cross attention
+        # For each linear layer, change y=WX to y=WX + WaWbX
+        filter_names = ['qkv']
+        if any(n in name_cols for n in filter_names) and isinstance(layer, nn.Linear):
             inject_lora(model, name, layer)
-            print("inject layer: ", layer.__class__.__name__)
     
     for name, param in model.named_parameters():
         if name.split('.')[-1] not in ['lora_a','lora_b']:  # 非Lora部分不计算梯度
