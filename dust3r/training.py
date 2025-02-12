@@ -133,9 +133,8 @@ def train(args):
 
     model.to(device)
     
-    ######################################### LoRA
+    ######################################### NOTE(gogojjh): LoRA
     for name, layer in model.named_modules():
-        print("name: ", name)
         name_cols = name.split('.')
         # Retrieve all linear layer in cross attention
         # For each linear layer, change y=WX to y=WX + WaWbX
@@ -144,7 +143,7 @@ def train(args):
             inject_lora(model, name, layer)
     
     for name, param in model.named_parameters():
-        if name.split('.')[-1] not in ['lora_a','lora_b']:  # 非Lora部分不计算梯度
+        if name.split('.')[-1] not in ['lora_a','lora_b']: # Not compute gradient for non-LoRA part
             param.requires_grad = False
         else:
             param.requires_grad = True
@@ -214,15 +213,14 @@ def train(args):
             if args.save_freq and epoch % args.save_freq == 0 or epoch == args.epochs:
                 save_model(epoch - 1, 'last', best_so_far)
                 
-                ######################################### LoRA
-                lora_state={}
+                ######################################### NOTE(gogojjh): LoRA
+                lora_state = {}
                 for name, param in model.named_parameters():
-                    name_cols=name.split('.')
-                    filter_names=['lora_a','lora_b']
-                    if any(n==name_cols[-1] for n in filter_names):
-                        lora_state[name]=param
-                torch.save(lora_state, 'lora.pt.tmp')
-                os.replace('lora.pt.tmp', 'lora.pt')
+                    name_cols = name.split('.')
+                    filter_names = ['lora_a','lora_b']
+                    if any(n == name_cols[-1] for n in filter_names):
+                        lora_state[name] = param
+                torch.save(lora_state, os.path.join(args.output_dir, 'lora.pt'))
                 #########################################
                 
         # Test on multiple datasets

@@ -1,16 +1,43 @@
-from unet import UNet
-from dataset import train_dataset
-from diffusion import forward_diffusion
-from config import * 
+import os
+import math
+import argparse
+
 import torch 
 from torch import nn
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
-import os 
+from dust3r.model import AsymmetricCroCo3DStereo
 
 LORA_ALPHA = 1    # lora的a权重
 LORA_R = 8        # lora的秩
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu" # 训练设备
+
+def parse_args():
+    # Create the argument parser
+    parser = argparse.ArgumentParser(description="Script with model configuration arguments")
+    
+    # Add arguments
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda",
+        help="Device to use for computation (e.g., 'cuda', 'cpu')"
+    )
+    parser.add_argument(
+        "--model_weight",
+        type=str,
+        required=True,
+        help="Path to the base model file or model identifier"
+    )
+    parser.add_argument(
+        "--lora_model",
+        type=str,
+        default=None,
+        help="Optional path to LoRA adapter model"
+    )
+
+    # Parse the arguments
+    args = parser.parse_args()
+    
+    return args
 
 # Lora实现，封装linear，替换到父module里
 class LoraLayer(nn.Module):
@@ -44,27 +71,24 @@ def inject_lora(model, name, layer):
     setattr(cur_layer, name_cols[-1], lora_layer)
 
 if __name__ == '__main__':
-    model = torch.load(args.model)
+    args = parse_args()
+    model = AsymmetricCroCo3DStereo.from_pretrained(args.model_weight).to(args.device) # load the whole model
 
     ######################################### LoRA
     for name, layer in model.named_modules():
-        print("name: ", name)
         name_cols = name.split('.')
         # Retrieve all linear layer in cross attention
         # For each linear layer, change y=WX to y=WX + WaWbX
         filter_names = ['qkv']
         if any(n in name_cols for n in filter_names) and isinstance(layer, nn.Linear):
-            print(name)
             inject_lora(model, name, layer)
 
     # Load LoRA weight
     try:
-        restore_lora_state = torch.load('lora.pt')
-        model.load_state_dict(restore_lora_state, strict=False)
+        restore_lora_state = torch.load(args.lora_model)
+        model.load_state_dict(restore_lora_state, strict=False) # update the model weight
     except:
         pass
-
-    model.to(args.device)
 
     for name, param in model.named_parameters():
         if name.split('.')[-1] not in ['lora_a','lora_b']:  # 非Lora部分不计算梯度
@@ -74,12 +98,14 @@ if __name__ == '__main__':
     #########################################
 
     ######################################### LoRA
-    lora_state={}
+    lora_state = {}
     for name, param in model.named_parameters():
         name_cols = name.split('.')
         filter_names = ['lora_a','lora_b']
         if any(n == name_cols[-1] for n in filter_names):
             lora_state[name] = param
-    torch.save(lora_state, 'lora.pt.tmp')
-    os.replace('lora.pt.tmp', 'lora.pt')
+    torch.save(lora_state, args.lora_model) # save the model weight
     #########################################
+
+    print('Number of Model Parameters: ', sum(p.numel() for p in model.parameters()))
+    print('Number of LoRA  Parameters: ', sum(param.numel() for param in lora_state.values()))
