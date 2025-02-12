@@ -55,17 +55,8 @@ if __name__ == '__main__':
 
         try:
             restore_lora_state = torch.load('/Rocket_ssd/image_matching_model_weights/dust3r_demo_512dpt_lora/lora.pt')
-            restore_lora_state = {k.replace('module.', ''): v for k, v in restore_lora_state.items()}
             model.load_state_dict(restore_lora_state, strict=False)
             print('Finish loading LoRA weights')
-
-            # print("Keys in restore_lora_state:", restore_lora_state.keys())
-            # print("Model's state_dict keys:", model.state_dict().keys())
-
-            # for name, param in model.named_parameters():
-            #     if 'lora_a' in name or 'lora_b' in name:
-            #         print(f"{name}: mean={param.mean().item()}, max={param.max().item()}")            
-            # exit()
         except:
             pass 
 
