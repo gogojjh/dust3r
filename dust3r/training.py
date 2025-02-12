@@ -215,7 +215,7 @@ def train(args):
                 
                 ######################################### NOTE(gogojjh): LoRA
                 lora_state = {}
-                for name, param in model.named_parameters():
+                for name, param in model_without_ddp.named_parameters():
                     name_cols = name.split('.')
                     filter_names = ['lora_a','lora_b']
                     if any(n == name_cols[-1] for n in filter_names):

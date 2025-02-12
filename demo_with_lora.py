@@ -5,6 +5,9 @@
 # --------------------------------------------------------
 # dust3r gradio demo executable
 # --------------------------------------------------------
+
+# python demo_with_lora.py --weights /Rocket_ssd/image_matching_model_weights/DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth
+
 import os
 import torch
 import tempfile
@@ -52,8 +55,17 @@ if __name__ == '__main__':
 
         try:
             restore_lora_state = torch.load('/Rocket_ssd/image_matching_model_weights/dust3r_demo_512dpt_lora/lora.pt')
+            restore_lora_state = {k.replace('module.', ''): v for k, v in restore_lora_state.items()}
             model.load_state_dict(restore_lora_state, strict=False)
             print('Finish loading LoRA weights')
+
+            # print("Keys in restore_lora_state:", restore_lora_state.keys())
+            # print("Model's state_dict keys:", model.state_dict().keys())
+
+            # for name, param in model.named_parameters():
+            #     if 'lora_a' in name or 'lora_b' in name:
+            #         print(f"{name}: mean={param.mean().item()}, max={param.max().item()}")            
+            # exit()
         except:
             pass 
 
@@ -68,10 +80,12 @@ if __name__ == '__main__':
                 for child in children:
                     cur_layer = getattr(cur_layer,child)  
                 lora_weight = (layer.lora_a @ layer.lora_b) * layer.alpha / layer.r
-                print(layer.raw_linear.weight, lora_weight)
-                input()
+                print(lora_weight)
                 layer.raw_linear.weight = nn.Parameter(layer.raw_linear.weight.add(lora_weight.T)).to(args.device)
                 setattr(cur_layer, name_cols[-1], layer.raw_linear)
+
+    print('Number of Model Parameters: ', sum(p.numel() for p in model.parameters()))
+    print('Number of LoRA  Parameters: ', sum(param.numel() for param in restore_lora_state.values()))
 
     # dust3r will write the 3D model inside tmpdirname
     with tempfile.TemporaryDirectory(suffix='dust3r_gradio_demo') as tmpdirname:

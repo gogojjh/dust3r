@@ -72,6 +72,8 @@ def inject_lora(model, name, layer):
 
 if __name__ == '__main__':
     args = parse_args()
+
+    """Training"""
     model = AsymmetricCroCo3DStereo.from_pretrained(args.model_weight).to(args.device) # load the whole model
 
     ######################################### LoRA
@@ -109,3 +111,46 @@ if __name__ == '__main__':
 
     print('Number of Model Parameters: ', sum(p.numel() for p in model.parameters()))
     print('Number of LoRA  Parameters: ', sum(param.numel() for param in lora_state.values()))
+
+    """Inference"""
+    USE_LORA = True
+    if USE_LORA:
+        from torch import nn
+        from dust3r.lora import LoraLayer, inject_lora
+
+        # Traverse all lora layer
+        for name,layer in model.named_modules():
+            name_cols = name.split('.')
+            filter_names = ['qkv']
+            if any(n in name_cols for n in filter_names) and isinstance(layer, nn.Linear):
+                inject_lora(model, name, layer)
+
+        try:
+            restore_lora_state = torch.load('/Rocket_ssd/image_matching_model_weights/dust3r_demo_512dpt_lora/lora.pt')
+            # restore_lora_state = {k.replace('module.', ''): v for k, v in restore_lora_state.items()}
+            model.load_state_dict(restore_lora_state, strict=False)
+            print('Finish loading LoRA weights')
+
+            # print("Keys in restore_lora_state:", restore_lora_state.keys())
+            # print("Model's state_dict keys:", model.state_dict().keys())
+
+            # for name, param in model.named_parameters():
+            #     if 'lora_a' in name or 'lora_b' in name:
+            #         print(f"{name}: mean={param.mean().item()}, max={param.max().item()}")            
+            # exit()
+        except:
+            pass 
+
+        model = model.to(args.device)
+
+        # Add lora weights into the model weight as the linear layer
+        for name, layer in model.named_modules():
+            name_cols = name.split('.')
+            if isinstance(layer, LoraLayer):
+                children = name_cols[:-1]
+                cur_layer = model 
+                for child in children:
+                    cur_layer = getattr(cur_layer,child)  
+                lora_weight = (layer.lora_a @ layer.lora_b) * layer.alpha / layer.r
+                layer.raw_linear.weight = nn.Parameter(layer.raw_linear.weight.add(lora_weight.T)).to(args.device)
+                setattr(cur_layer, name_cols[-1], layer.raw_linear)    
