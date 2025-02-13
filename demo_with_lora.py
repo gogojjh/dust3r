@@ -22,6 +22,7 @@ torch.backends.cuda.matmul.allow_tf32 = True  # for gpu >= Ampere and pytorch >=
 
 if __name__ == '__main__':
     parser = get_args_parser()
+    parser.add_argument("--lora_weight", type=str, default='lora.pt', help="LoRA weight")
     args = parser.parse_args()
     set_print_with_timestamp()
 
@@ -54,12 +55,14 @@ if __name__ == '__main__':
                 inject_lora(model, name, layer)
 
         try:
-            restore_lora_state = torch.load('/Rocket_ssd/image_matching_model_weights/dust3r_demo_512dpt_lora/lora.pt')
+            restore_lora_state = torch.load(args.lora_weight)
             model.load_state_dict(restore_lora_state, strict=False)
             print('Finish loading LoRA weights')
+            print('Number of LoRA  Parameters: ', sum(param.numel() for param in restore_lora_state.values()))
         except:
             pass 
 
+        print('Number of Model Parameters: ', sum(p.numel() for p in model.parameters()))
         model = model.to(args.device)
 
         # Add lora weights into the model weight as the linear layer
@@ -71,12 +74,8 @@ if __name__ == '__main__':
                 for child in children:
                     cur_layer = getattr(cur_layer,child)  
                 lora_weight = (layer.lora_a @ layer.lora_b) * layer.alpha / layer.r
-                print(lora_weight)
                 layer.raw_linear.weight = nn.Parameter(layer.raw_linear.weight.add(lora_weight.T)).to(args.device)
                 setattr(cur_layer, name_cols[-1], layer.raw_linear)
-
-    print('Number of Model Parameters: ', sum(p.numel() for p in model.parameters()))
-    print('Number of LoRA  Parameters: ', sum(param.numel() for param in restore_lora_state.values()))
 
     # dust3r will write the 3D model inside tmpdirname
     with tempfile.TemporaryDirectory(suffix='dust3r_gradio_demo') as tmpdirname:
