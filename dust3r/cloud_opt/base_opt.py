@@ -244,9 +244,19 @@ class BasePCOptimizer (nn.Module):
         return self
 
     def forward(self, ret_details=False):
+        # NOTE(gogojjh):
+        """
+        Performs the forward pass of the optimization process.
+
+        Args:
+            ret_details (bool): Flag indicating whether to return the details of the optimization.
+
+        Returns:
+            float or tuple: The loss value if `ret_details` is False, otherwise a tuple containing the loss value and details.
+        """
         pw_poses = self.get_pw_poses()  # cam-to-world
         pw_adapt = self.get_adaptors()
-        proj_pts3d = self.get_pts3d()
+        proj_pts3d = self.get_pts3d()                                           # optimized point in the global coordinate
         # pre-compute pixel weights
         weight_i = {i_j: self.conf_trf(c) for i_j, c in self.conf_i.items()}
         weight_j = {i_j: self.conf_trf(c) for i_j, c in self.conf_j.items()}
@@ -258,11 +268,15 @@ class BasePCOptimizer (nn.Module):
         for e, (i, j) in enumerate(self.edges):
             i_j = edge_str(i, j)
             # distance in image i and j
-            aligned_pred_i = geotrf(pw_poses[e], pw_adapt[e] * self.pred_i[i_j])
+            aligned_pred_i = geotrf(pw_poses[e], pw_adapt[e] * self.pred_i[i_j]) # predicted point in the global coordinate
             aligned_pred_j = geotrf(pw_poses[e], pw_adapt[e] * self.pred_j[i_j])
             li = self.dist(proj_pts3d[i], aligned_pred_i, weight=weight_i[i_j]).mean()
             lj = self.dist(proj_pts3d[j], aligned_pred_j, weight=weight_j[i_j]).mean()
             loss = loss + li + lj
+            
+            print(f"Edge: {i} - {j}")
+            print(proj_pts3d[i].shape, aligned_pred_i.shape)
+            input()
 
             if ret_details:
                 details[i, j] = li + lj
@@ -322,15 +336,28 @@ class BasePCOptimizer (nn.Module):
         viz.show(**kw)
         return viz
 
-
 def global_alignment_loop(net, lr=0.01, niter=300, schedule='cosine', lr_min=1e-6):
+    # NOTE(gogojjh):
+    """
+    Performs global alignment optimization loop.
+
+    Args:
+        net (nn.Module): The neural network model.
+        lr (float): The learning rate for optimization (default: 0.01).
+        niter (int): The number of iterations for optimization (default: 300).
+        schedule (str): The learning rate schedule (default: 'cosine').
+        lr_min (float): The minimum learning rate (default: 1e-6).
+
+    Returns:
+        float: The final loss value after optimization.
+    """
     params = [p for p in net.parameters() if p.requires_grad]
     if not params:
         return net
 
     verbose = net.verbose
     if verbose:
-        print('Global alignement - optimizing for:')
+        print('Global alignment - optimizing for:')
         print([name for name, value in net.named_parameters() if value.requires_grad])
 
     lr_base = lr
@@ -350,6 +377,23 @@ def global_alignment_loop(net, lr=0.01, niter=300, schedule='cosine', lr_min=1e-
 
 
 def global_alignment_iter(net, cur_iter, niter, lr_base, lr_min, optimizer, schedule):
+    # NOTE(gogojjh):
+    """
+    Perform a single iteration of global alignment optimization.
+
+    Args:
+        net: The neural network model.
+        cur_iter: The current iteration number.
+        niter: The total number of iterations.
+        lr_base: The base learning rate.
+        lr_min: The minimum learning rate.
+        optimizer: The optimizer used for gradient descent.
+        schedule: The learning rate schedule ('cosine' or 'linear').
+
+    Returns:
+        loss: The loss value for the current iteration.
+        lr: The learning rate used for the current iteration.
+    """
     t = cur_iter / niter
     if schedule == 'cosine':
         lr = cosine_schedule(t, lr_base, lr_min)
