@@ -108,7 +108,12 @@ class BasePCOptimizer (nn.Module):
 			self.imgs = rgb(imgs)
 
 		# calibrate confidence map during optimization
+		# add weight as the learned parameters
 		self.calib_params = calib_params
+		self.weight_i = nn.ParameterDict({ij: nn.Parameter(torch.ones_like(pred1_conf[n]), requires_grad=False) 
+									      for n, ij in enumerate(self.str_edges)})
+		self.weight_j = nn.ParameterDict({ij: nn.Parameter(torch.ones_like(pred2_conf[n]), requires_grad=False) 
+										  for n, ij in enumerate(self.str_edges)})        
 		if self.calib_params is not None:
 			# The hyper-parameter is related to the scale
 			# Scale-specific:  1
@@ -116,10 +121,6 @@ class BasePCOptimizer (nn.Module):
 			self.MU = self.calib_params['mu']
 			self.CONF_THRE = self.calib_params['conf_thre']
 			self.PSEUDO_GT_THRE = self.calib_params['pseudo_gt_thre']
-			self.weight_i = nn.ParameterDict({ij: nn.Parameter(torch.ones_like(pred1_conf[n]), requires_grad=False) 
-											 for n, ij in enumerate(self.str_edges)})
-			self.weight_j = nn.ParameterDict({ij: nn.Parameter(torch.ones_like(pred2_conf[n]), requires_grad=False) 
-											 for n, ij in enumerate(self.str_edges)})        
 
 	@property
 	def n_edges(self):
@@ -285,14 +286,14 @@ class BasePCOptimizer (nn.Module):
 			i_j = edge_str(i, j)
 			if self.calib_params is None:
 				# compute pixel weights
-				weight_i = self.conf_trf(self.conf_i[i_j])
-				weight_j = self.conf_trf(self.conf_j[i_j])				
+				self.weight_i[i_j] = self.conf_trf(self.conf_i[i_j])
+				self.weight_j[i_j] = self.conf_trf(self.conf_j[i_j])				
 
 				aligned_pred_i = geotrf(pw_poses[e], pw_adapt[e] * self.pred_i[i_j]) # predicted point in the global coordinate
 				aligned_pred_j = geotrf(pw_poses[e], pw_adapt[e] * self.pred_j[i_j])
 
-				li = self.dist(proj_pts3d[i], aligned_pred_i, weight=weight_i).mean()
-				lj = self.dist(proj_pts3d[j], aligned_pred_j, weight=weight_j).mean()
+				li = self.dist(proj_pts3d[i], aligned_pred_i, weight=self.weight_i[i_j]).mean()
+				lj = self.dist(proj_pts3d[j], aligned_pred_j, weight=self.weight_j[i_j]).mean()
 			else:
 				# set mask to inliers with high confidence
 				C_i = self.conf_trf(self.conf_i[i_j])
@@ -304,16 +305,19 @@ class BasePCOptimizer (nn.Module):
 				aligned_pred_i = geotrf(pw_poses[e], pw_adapt[e] * self.pred_i[i_j]) # predicted point in the global coordinate
 				aligned_pred_j = geotrf(pw_poses[e], pw_adapt[e] * self.pred_j[i_j])
 				res_i = proj_pts3d[i] - aligned_pred_i
-				res_j = proj_pts3d[j] - aligned_pred_j				
+				res_j = proj_pts3d[j] - aligned_pred_j
 				self.weight_i[i_j] = C_i / (1 + self.dist(res_i, zeros_NM3, ones_NM3[:, :, 1].squeeze()) / self.MU) ** 2
 				self.weight_j[i_j] = C_j / (1 + self.dist(res_j, zeros_NM3, ones_NM3[:, :, 1].squeeze()) / self.MU) ** 2
 
 				# Regularization term (μ*(√w_p - √C_p)^2)
 				reg_i = self.MU * (torch.sqrt(self.weight_i[i_j]) - torch.sqrt(C_i))**2
 				reg_j = self.MU * (torch.sqrt(self.weight_j[i_j]) - torch.sqrt(C_j))**2
-				# Weighted error term (w_p * ||e_p||) with masked inliers
+				
+				# Avoid zero masked element to cause NaN
 				li = self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i]).mean() + reg_i[mask_i].mean()
+				if torch.isnan(li).any(): li = torch.tensor(0)
 				lj = self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j]).mean() + reg_j[mask_j].mean()
+				if torch.isnan(lj).any(): lj = torch.tensor(0)
 
 			loss = loss + li + lj
 
