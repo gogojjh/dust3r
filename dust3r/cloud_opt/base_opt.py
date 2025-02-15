@@ -50,6 +50,7 @@ class BasePCOptimizer (nn.Module):
 						 pw_break=20,
 						 rand_pose=torch.randn,
 						 iterationsCount=None,
+						 calib_params=None,
 						 verbose=True):
 		super().__init__()
 		if not isinstance(view1['idx'], list):
@@ -57,7 +58,6 @@ class BasePCOptimizer (nn.Module):
 		if not isinstance(view2['idx'], list):
 			view2['idx'] = view2['idx'].tolist()
 		self.edges = [(int(i), int(j)) for i, j in zip(view1['idx'], view2['idx'])]
-		# NOTE(gogojjh):
 		# is_symmetrized = True: edges = [(1, 0), (2, 0), (2, 1), (0, 1), (0, 2), (1, 2), ...]
 		# is_symmetrized = False: edges = [(1, 0), (2, 0), (2, 1)]
 		self.is_symmetrized = set(self.edges) == {(j, i) for i, j in self.edges}
@@ -107,12 +107,19 @@ class BasePCOptimizer (nn.Module):
 				imgs[idx] = view2['img'][v]
 			self.imgs = rgb(imgs)
 
-		##########################33 NOTE(gogojjh):
-		# add learnable weights
-		self.weight_i = nn.ParameterDict({ij: nn.Parameter(torch.ones_like(pred1_conf[n]), requires_grad=False) 
-										  for n, ij in enumerate(self.str_edges)})
-		self.weight_j = nn.ParameterDict({ij: nn.Parameter(torch.ones_like(pred2_conf[n]), requires_grad=False) 
-										  for n, ij in enumerate(self.str_edges)})        
+		# calibrate confidence map during optimization
+		self.calib_params = calib_params
+		if self.calib_params is not None:
+			# The hyper-parameter is related to the scale
+			# Scale-specific:  1
+			# scale-ambiguous: 0.01
+			self.MU = self.calib_params['mu']
+			self.CONF_THRE = self.calib_params['conf_thre']
+			self.PSEUDO_GT_THRE = self.calib_params['pseudo_gt_thre']
+			self.weight_i = nn.ParameterDict({ij: nn.Parameter(torch.ones_like(pred1_conf[n]), requires_grad=False) 
+											 for n, ij in enumerate(self.str_edges)})
+			self.weight_j = nn.ParameterDict({ij: nn.Parameter(torch.ones_like(pred2_conf[n]), requires_grad=False) 
+											 for n, ij in enumerate(self.str_edges)})        
 
 	@property
 	def n_edges(self):
@@ -254,7 +261,6 @@ class BasePCOptimizer (nn.Module):
 		return self
 
 	def forward(self, ret_details=False):
-		# NOTE(gogojjh):
 		"""
 		Performs the forward pass of the optimization process.
 
@@ -264,187 +270,60 @@ class BasePCOptimizer (nn.Module):
 		Returns:
 			float or tuple: The loss value if `ret_details` is False, otherwise a tuple containing the loss value and details.
 		"""
-		# Constant parameters
-		mu = 0.01
-		conf_thre = 0.5
-
 		pw_poses = self.get_pw_poses()  # cam-to-world
 		pw_adapt = self.get_adaptors()
-		proj_pts3d = self.get_pts3d()                                           # optimized point in the global coordinate
+		proj_pts3d = self.get_pts3d()                                               # optimized point in the global coordinate
 
 		loss = 0
 		if ret_details:
 			details = -torch.ones((self.n_imgs, self.n_imgs))
 
+		zeros_NM3 = torch.zeros_like(proj_pts3d[0])
+		ones_NM3  = torch.ones_like(proj_pts3d[0])
+
 		for e, (i, j) in enumerate(self.edges):
 			i_j = edge_str(i, j)
-			# distance in image i and j
-			aligned_pred_i = geotrf(pw_poses[e], pw_adapt[e] * self.pred_i[i_j]) # predicted point in the global coordinate
-			aligned_pred_j = geotrf(pw_poses[e], pw_adapt[e] * self.pred_j[i_j])
-			res_i = proj_pts3d[i] - aligned_pred_i
-			res_j = proj_pts3d[j] - aligned_pred_j
-			
-			C_i = self.conf_trf(self.conf_i[i_j])
-			C_j = self.conf_trf(self.conf_j[i_j])
+			if self.calib_params is None:
+				# compute pixel weights
+				weight_i = self.conf_trf(self.conf_i[i_j])
+				weight_j = self.conf_trf(self.conf_j[i_j])				
 
-			# Weight
-			self.weight_i[i_j] = C_i / (1 + res_i.norm(dim=-1) / mu) ** 2
-			self.weight_j[i_j] = C_j / (1 + res_j.norm(dim=-1) / mu) ** 2
+				aligned_pred_i = geotrf(pw_poses[e], pw_adapt[e] * self.pred_i[i_j]) # predicted point in the global coordinate
+				aligned_pred_j = geotrf(pw_poses[e], pw_adapt[e] * self.pred_j[i_j])
 
-			mask_i = C_i > conf_thre
-			mask_j = C_j > conf_thre
-		
-			# Regularization term (μ*(√w_p - √C_p)^2)
-			reg_i = mu * (torch.sqrt(self.weight_i[i_j][mask_i]) - torch.sqrt(C_i[mask_i]))**2
-			reg_j = mu * (torch.sqrt(self.weight_j[i_j][mask_j]) - torch.sqrt(C_j[mask_j]))**2
+				li = self.dist(proj_pts3d[i], aligned_pred_i, weight=weight_i).mean()
+				lj = self.dist(proj_pts3d[j], aligned_pred_j, weight=weight_j).mean()
+			else:
+				# set mask to inliers with high confidence
+				C_i = self.conf_trf(self.conf_i[i_j])
+				C_j = self.conf_trf(self.conf_j[i_j])
+				mask_i = C_i > self.CONF_THRE
+				mask_j = C_j > self.CONF_THRE
 
-			# Weighted error term (w_p * ||e_p||)
-			loss_i = (self.weight_i[i_j][mask_i] * res_i.norm(dim=-1)[mask_i]).mean() + reg_i.mean()
-			loss_j = (self.weight_j[i_j][mask_j] * res_j.norm(dim=-1)[mask_j]).mean() + reg_j.mean()
+				# compute pixel weights with calibration
+				aligned_pred_i = geotrf(pw_poses[e], pw_adapt[e] * self.pred_i[i_j]) # predicted point in the global coordinate
+				aligned_pred_j = geotrf(pw_poses[e], pw_adapt[e] * self.pred_j[i_j])
+				res_i = proj_pts3d[i] - aligned_pred_i
+				res_j = proj_pts3d[j] - aligned_pred_j				
+				self.weight_i[i_j] = C_i / (1 + self.dist(res_i, zeros_NM3, ones_NM3[:, :, 1].squeeze()) / self.MU) ** 2
+				self.weight_j[i_j] = C_j / (1 + self.dist(res_j, zeros_NM3, ones_NM3[:, :, 1].squeeze()) / self.MU) ** 2
 
-			loss += loss_i + loss_j
+				# Regularization term (μ*(√w_p - √C_p)^2)
+				reg_i = self.MU * (torch.sqrt(self.weight_i[i_j]) - torch.sqrt(C_i))**2
+				reg_j = self.MU * (torch.sqrt(self.weight_j[i_j]) - torch.sqrt(C_j))**2
+				# Weighted error term (w_p * ||e_p||) with masked inliers
+				li = self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i]).mean() + reg_i[mask_i].mean()
+				lj = self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j]).mean() + reg_j[mask_j].mean()
+
+			loss = loss + li + lj
 
 			if ret_details:
-				details[i, j] = loss_i + loss_j
+				details[i, j] = li + lj
 		loss /= self.n_edges  # average over all pairs
 
 		if ret_details:
 			return loss, details
 		return loss
-
-	@torch.no_grad()
-	def visualize_weights_errors(self, edge_str_key, cur_iter, vmin=0, vmax=1):
-		"""
-		Visualizes raw images, confidence maps, weights, and error maps for the ith and jth images in a 2x4 grid.
-
-		Args:
-			edge_str_key (str): Edge identifier (e.g., "0-1").
-			vmin/vmax (float): Colorbar range for plotting.
-		"""
-		import matplotlib.pyplot as plt
-		import torch
-
-		mu = 0.01
-		conf_thre = 1.5
-
-		# Fetch data
-		i, j = map(int, edge_str_key.split('_'))
-		pw_poses = self.get_pw_poses()  # cam-to-world
-		pw_adapt = self.get_adaptors()
-		proj_pts3d = self.get_pts3d()  # optimized point in the global coordinate
-
-		# Compute error maps
-		aligned_pred_j = geotrf(pw_poses[self.str_edges.index(edge_str_key)], pw_adapt[self.str_edges.index(edge_str_key)] * self.pred_j[edge_str_key])
-		res_j = proj_pts3d[j] - aligned_pred_j
-		error_map_j = res_j.norm(dim=-1).cpu().numpy()
-
-		aligned_pred_i = geotrf(pw_poses[self.str_edges.index(edge_str_key)], pw_adapt[self.str_edges.index(edge_str_key)] * self.pred_i[edge_str_key])
-		res_i = proj_pts3d[i] - aligned_pred_i
-		error_map_i = res_i.norm(dim=-1).cpu().numpy()
-
-		# Fetch raw images, confidence maps, and weights
-		raw_image_i = to_numpy(self.imgs[i])
-		if np.issubdtype(raw_image_i.dtype, np.floating):
-			raw_image_i = np.uint8(255*raw_image_i.clip(min=0, max=1))
-		raw_image_j = to_numpy(self.imgs[j])
-		if np.issubdtype(raw_image_j.dtype, np.floating):
-			raw_image_j = np.uint8(255*raw_image_j.clip(min=0, max=1))
-		C_i = self.conf_trf(self.conf_i[edge_str_key]).cpu().numpy()
-		C_j = self.conf_trf(self.conf_j[edge_str_key]).cpu().numpy()
-		weight_i = C_i / (1 + error_map_i / mu)**2
-		weight_j = C_j / (1 + error_map_j / mu)**2
-
-		mask_i = weight_i < conf_thre
-		mask_j = weight_j < conf_thre
-
-		# Extract values for the ith and jth maps
-		random_coords_i = np.array([[30, 470], [80, 400]])
-		C_i_values = np.array([C_i[y, x] for y, x in random_coords_i])
-		weight_i_values = np.array([weight_i[y, x] for y, x in random_coords_i])
-		error_i_values = np.array([error_map_i[y, x] for y, x in random_coords_i])
-
-		random_coords_j = np.array([[150, 300], [100, 400]])
-		C_j_values = np.array([C_j[y, x] for y, x in random_coords_j])
-		weight_j_values = np.array([weight_j[y, x] for y, x in random_coords_j])
-		error_j_values = np.array([error_map_j[y, x] for y, x in random_coords_j])
-
-		# max_error = max(np.max(error_j_values), np.max(error_i_values))
-		max_error = 0.125
-		max_conf = 2.8
-
-		opt_depthmaps = self.get_depthmaps()
-
-		# Create figure
-		fig, axes = plt.subplots(2, 7, figsize=(24, 8))
-
-		# Plot ith row
-		axes[0, 0].imshow(raw_image_i, cmap='gray')
-		axes[0, 0].set_title(f'Raw Image {i}')
-		for idx in range(len(random_coords_i)):
-			axes[0, 0].plot([random_coords_i[idx][1]], [random_coords_i[idx][0]], color='r', marker='x', markersize=10)
-
-		raw_image_i[mask_i] = [0, 0, 0]
-		axes[0, 1].imshow(raw_image_i, cmap='gray')
-		axes[0, 1].set_title(f'Filtered Image {i}')
-
-		im = axes[0, 2].imshow(C_i, cmap='jet')
-		axes[0, 2].set_title(f'Confidence Map {i}')
-		fig.colorbar(im, ax=axes[0, 2])
-		
-		im = axes[0, 3].imshow(weight_i, cmap='jet')
-		axes[0, 3].set_title(f'Weight {i}')
-		fig.colorbar(im, ax=axes[0, 3])
-		
-		im = axes[0, 4].imshow(error_map_i, cmap='jet')
-		axes[0, 4].set_title(f'Error Map {i}')
-		fig.colorbar(im, ax=axes[0, 4])
-		
-		im = axes[0, 5].imshow(opt_depthmaps[i].detach().cpu().numpy(), cmap='jet')
-		axes[0, 5].set_title(f'Depth Map {i}')
-		fig.colorbar(im, ax=axes[0, 5], shrink=0.8)
-		
-		for idx in range(len(random_coords_i)):
-			axes[0, 6].plot([C_i_values[idx]], [error_i_values[idx]], color='r', marker='x')
-			axes[0, 6].plot([weight_i_values[idx]], [error_i_values[idx]], color='k', marker='x')
-		axes[0, 6].set_xlim(-0.3, max_conf)
-		axes[0, 6].set_ylim(-0.01, max_error)
-
-		# Plot jth row
-		axes[1, 0].imshow(raw_image_j, cmap='gray')
-		axes[1, 0].set_title(f'Raw Image {j}')
-		for idx in range(len(random_coords_j)):
-			axes[1, 0].plot([random_coords_j[idx][1]], [random_coords_j[idx][0]], color='r', marker='x', markersize=10)
-
-		raw_image_j[mask_j] = [0, 0, 0]
-		axes[1, 1].imshow(raw_image_j, cmap='gray')
-		axes[1, 1].set_title(f'Filtered Image {j}')
-
-		im = axes[1, 2].imshow(C_j, cmap='jet')
-		axes[1, 2].set_title(f'Confidence Map {j}')
-		fig.colorbar(im, ax=axes[1, 2])
-		
-		im = axes[1, 3].imshow(weight_j, cmap='jet')
-		axes[1, 3].set_title(f'Weight {j}')
-		fig.colorbar(im, ax=axes[1, 3])
-		
-		im = axes[1, 4].imshow(error_map_j, cmap='jet')
-		axes[1, 4].set_title(f'Error Map {j}')
-		fig.colorbar(im, ax=axes[1, 4])
-		
-		im = axes[1, 5].imshow(opt_depthmaps[j].detach().cpu().numpy(), cmap='jet')
-		axes[1, 5].set_title(f'Depth Map {j}')
-		fig.colorbar(im, ax=axes[1, 5], shrink=0.8)
-		
-		for idx in range(len(random_coords_j)):
-			axes[1, 6].plot([C_j_values[idx]], [error_j_values[idx]], color='r', marker='x')
-			axes[1, 6].plot([weight_j_values[idx]], [error_j_values[idx]], color='k', marker='x')
-		axes[1, 6].set_xlim(-0.3, max_conf)
-		axes[1, 6].set_ylim(-0.01, max_error)			
-
-		plt.tight_layout()
-		plt.savefig(f'/Titan/code/robohike_ws/src/pose_estimation_models/outputs_duster/replica_img_weights_errors_{cur_iter}.jpg')
-		plt.close()
-
 
 	@torch.cuda.amp.autocast(enabled=False)
 	def compute_global_alignment(self, init=None, niter_PnP=10, **kw):
@@ -497,7 +376,6 @@ class BasePCOptimizer (nn.Module):
 		return viz
 
 def global_alignment_loop(net, lr=0.01, niter=300, schedule='cosine', lr_min=1e-6):
-	# NOTE(gogojjh):
 	"""
 	Performs global alignment optimization loop.
 
@@ -535,9 +413,7 @@ def global_alignment_loop(net, lr=0.01, niter=300, schedule='cosine', lr_min=1e-
 			loss, _ = global_alignment_iter(net, n, niter, lr_base, lr_min, optimizer, schedule)
 	return loss
 
-
 def global_alignment_iter(net, cur_iter, niter, lr_base, lr_min, optimizer, schedule):
-	# NOTE(gogojjh):
 	"""
 	Perform a single iteration of global alignment optimization.
 
@@ -563,16 +439,11 @@ def global_alignment_iter(net, cur_iter, niter, lr_base, lr_min, optimizer, sche
 		raise ValueError(f'bad lr {schedule=}')
 	adjust_learning_rate_by_lr(optimizer, lr)
 	optimizer.zero_grad()
-
-	if cur_iter % 50 == 0:  # Visualize every 50 iterations
-		net.visualize_weights_errors(edge_str(0, 1), cur_iter)
-
 	loss = net()
 	loss.backward()
 	optimizer.step()
 
 	return float(loss), lr
-
 
 @torch.no_grad()
 def clean_pointcloud( im_confs, K, cams, depthmaps, all_pts3d, 
