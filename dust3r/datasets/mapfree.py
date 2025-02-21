@@ -2,11 +2,10 @@
 # Licensed under CC BY-NC-SA 4.0 (non-commercial use only).
 #
 # --------------------------------------------------------
-# Dataloader for MapFree dataset
+# Modified MapFree dataloader using predefined pairs
 # --------------------------------------------------------
 import os.path as osp
 import numpy as np
-import random
 from glob import glob
 from scipy.spatial.transform import Rotation
 
@@ -18,39 +17,29 @@ from dust3r.utils.image import imread_cv2, rgb
 import cv2
 
 class MapFree(BaseStereoViewDataset):
-	""" Dataset for MapFree evaluation - random pairs from scene sequences """
+	""" Dataset for MapFree evaluation using predefined pairs """
 	
 	def __init__(self, *args, ROOT, split='test', **kwargs):
 		self.ROOT = ROOT
 		super().__init__(*args, **kwargs)
 		self.split = split
-		self.num_data_each_scene = 10
-		self._load_scenes()
+		self._load_pairs_and_scenes()
 
-	def _load_scenes(self):
-		# Load all scenes from the specified split
-		self.scenes = []
-		scene_dirs = glob(osp.join(self.ROOT, self.split, 's*'))
+	def _load_pairs_and_scenes(self):
+		# Load predefined pairs and organize scene data
+		self.pairs = np.load(osp.join(self.ROOT, self.split, 'mapfree_pairs.npy'))
+		self.scene_paths = {scene: osp.join(self.ROOT, self.split, scene) 
+							for scene in np.unique(self.pairs['scene_name'])}
 		
-		for scene_dir in scene_dirs:
-			# Load all frames in seq1 (query frames)
-			frames = sorted(glob(osp.join(scene_dir, 'seq1', 'frame_*.jpg')))
-			if not frames:
-				continue
-				
-			# Load camera parameters
-			intrinsics = self._load_intrinsics(osp.join(scene_dir, 'intrinsics.txt'))
-			poses = self._load_poses(osp.join(scene_dir, 'poses.txt'))
-			
-			self.scenes.append({
-				'path': scene_dir,
-				'frames': frames,
-				'intrinsics': intrinsics,
-				'poses': poses
-			})
+		# Preload scene parameters for faster access
+		self.scene_data = {}
+		for scene_name, scene_path in self.scene_paths.items():
+			self.scene_data[scene_name] = {
+				'intrinsics': self._load_intrinsics(osp.join(scene_path, 'intrinsics.txt')),
+				'poses': self._load_poses(osp.join(scene_path, 'poses.txt'))
+			}
 
 	def _load_intrinsics(self, path):
-		# Load per-frame intrinsics: {frame_path: (fx, fy, cx, cy)}
 		intrinsics = {}
 		with open(path) as f:
 			for line in f:
@@ -60,52 +49,45 @@ class MapFree(BaseStereoViewDataset):
 		return intrinsics
 
 	def _load_poses(self, path):
-		# Load world-to-camera poses: {frame_path: (4x4 matrix)}
 		poses = {}
 		with open(path) as f:
 			for line in f:
 				parts = line.strip().split()
 				frame_path = osp.join(osp.dirname(path), parts[0])
 				qw, qx, qy, qz, tx, ty, tz = map(float, parts[1:8])
-				
-				# Convert quaternion to rotation matrix
-				rot = self.quat_to_rotmat(qw, qx, qy, qz)
+				rot = Rotation.from_quat([qx, qy, qz, qw]).as_matrix()
 				pose = np.eye(4, dtype=np.float32)
 				pose[:3, :3] = rot
 				pose[:3, 3] = [tx, ty, tz]
 				poses[frame_path] = pose
 		return poses
 
-	def quat_to_rotmat(self, qw, qx, qy, qz):
-		return Rotation.from_quat(np.array([qx, qy, qz, qw])).as_matrix()
-
-	# NOTE(gogojjh): Arbitrary multiplier for epoch size
 	def __len__(self):
-		return len(self.scenes) * self.num_data_each_scene
+		return len(self.pairs)
 
 	def get_stats(self):
-		return f'{len(self.scenes)} scenes with {sum(len(s["frames"]) for s in self.scenes)} total frames'
+		return f'{len(self.pairs)} predefined pairs from {len(self.scene_paths)} scenes'
 
-	def _get_views(self, scene_idx, resolution, rng):
-		# Randomly select two frames from the same scene
-		scene = self.scenes[scene_idx % len(self.scenes)]
-		frame_paths = random.sample(scene['frames'], 2)
+	def _get_views(self, pair_idx, resolution, rng):
+		pair = self.pairs[pair_idx]
+		print(pair)
+		scene_name = pair['scene_name']
+		scene_path = self.scene_paths[scene_name]
+		scene_params = self.scene_data[scene_name]
 		
 		views = []
-		for path in frame_paths:
-			# Load color image and depth map
-			image = imread_cv2(path)
-			depth_path = path.replace('.jpg', '.zed.png')
-			depth_map = imread_cv2(depth_path, cv2.IMREAD_ANYDEPTH)
-			depth_map = (depth_map / 1000).astype(np.float32)  # Convert mm to meters
+		for img_name, depth_name in zip([pair['img0'], pair['img1']], [pair['depth0'], pair['depth1']]):
+			print(img_name, depth_name)
 
+			frame_path = osp.join(scene_path, img_name)
+			image = imread_cv2(frame_path)
+
+			depth_path = osp.join(scene_path, depth_name)
+			depth_map = imread_cv2(depth_path, cv2.IMREAD_ANYDEPTH).astype(np.float32) / 1000.0
+			
 			# Get camera parameters
-			intrinsics = scene['intrinsics'][path]
-			
-			# world-to-camera pose: transform world point into camera coordinate
-			pose_w2c = scene['poses'][path]
-			
-			# Convert to camera-to-world pose: transform camera point into world coordinate
+			intrinsics = scene_params['intrinsics'][frame_path]
+			pose_w2c = scene_params['poses'][frame_path]
 			pose_c2w = np.linalg.inv(pose_w2c)
 			
 			# Create intrinsics matrix
@@ -113,21 +95,21 @@ class MapFree(BaseStereoViewDataset):
 			intrinsics_mat = np.array([
 				[fx, 0, cx],
 				[0, fy, cy],
-				[0,  0,  1]
+				[0, 0, 1]
 			], dtype=np.float32)
 			
-			# Apply any necessary preprocessing
+			# Apply preprocessing
 			image, depth_map, intrinsics_mat = self._crop_resize_if_necessary(
-				image, depth_map, intrinsics_mat, resolution, rng, info=path)
+				image, depth_map, intrinsics_mat, resolution, rng, info=frame_path)
 			
 			views.append({
 				'img': image,
 				'depthmap': depth_map,
-				'camera_pose': pose_c2w,  # Converted to cam2world
+				'camera_pose': pose_c2w,
 				'camera_intrinsics': intrinsics_mat,
 				'dataset': 'MapFree',
-				'label': osp.basename(scene['path']),
-				'instance': osp.basename(path)
+				'label': scene_name,
+				'instance': img_name
 			})
 			
 		return views
@@ -141,7 +123,7 @@ if __name__ == '__main__':
 	# Initialize MapFree dataset
 	dataset = MapFree(
 		ROOT="data/mapfree_processed",  # Path to MapFree data
-		split='test',                   # Use test split
+		split='test_pseudo_depth',      # Use test split
 		resolution=224,                 # Target resolution
 		aug_crop=16                     # Augmentation crop size (if needed)
 	)
