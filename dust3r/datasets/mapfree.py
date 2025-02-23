@@ -70,14 +70,12 @@ class MapFree(BaseStereoViewDataset):
 
 	def _get_views(self, pair_idx, resolution, rng):
 		pair = self.pairs[pair_idx]
-		print(pair)
 		scene_name = pair['scene_name']
 		scene_path = self.scene_paths[scene_name]
 		scene_params = self.scene_data[scene_name]
 		
 		views = []
 		for img_name, depth_name in zip([pair['img0'], pair['img1']], [pair['depth0'], pair['depth1']]):
-			print(img_name, depth_name)
 
 			frame_path = osp.join(scene_path, img_name)
 			image = imread_cv2(frame_path)
@@ -95,7 +93,7 @@ class MapFree(BaseStereoViewDataset):
 			intrinsics_mat = np.array([
 				[fx, 0, cx],
 				[0, fy, cy],
-				[0, 0, 1]
+				[0,  0,  1]
 			], dtype=np.float32)
 			
 			# Apply preprocessing
@@ -121,9 +119,10 @@ if __name__ == '__main__':
 	from dust3r.utils.image import rgb
 
 	# Initialize MapFree dataset
+	# NOTE(gogojjh): Users should specify the split name for training
 	dataset = MapFree(
 		ROOT="data/mapfree_processed",  # Path to MapFree data
-		split='test_pseudo_depth',      # Use test split
+		split='train',      # Use test split
 		resolution=224,                 # Target resolution
 		aug_crop=16                     # Augmentation crop size (if needed)
 	)
@@ -132,11 +131,10 @@ if __name__ == '__main__':
 	for idx in np.random.permutation(len(dataset)):
 		views = dataset[idx]
 		assert len(views) == 2, "Each sample should contain 2 views"
-		print(f"Sample {idx}: {view_name(views[0])} vs {view_name(views[1])}")
+		# print(f"Sample {idx}: {view_name(views[0])} vs {view_name(views[1])}")
 		viz = SceneViz()
 		poses = [views[i]['camera_pose'] for i in [0, 1]]
 		cam_size = max(auto_cam_size(poses), 0.001)
-		cam_size = 2
 		for view_idx in [0, 1]:
 			pts3d = views[view_idx].get('pts3d', None)  # Will be None until inference
 			valid_mask = views[view_idx]['valid_mask']
