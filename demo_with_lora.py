@@ -22,7 +22,7 @@ torch.backends.cuda.matmul.allow_tf32 = True  # for gpu >= Ampere and pytorch >=
 
 if __name__ == '__main__':
     parser = get_args_parser()
-    parser.add_argument("--lora_weight", type=str, default='lora.pt', help="LoRA weight")
+    parser.add_argument("--lora_weight", type=str, default=None, help="LoRA weight")
     args = parser.parse_args()
     set_print_with_timestamp()
 
@@ -42,7 +42,7 @@ if __name__ == '__main__':
         weights_path = "naver/" + args.model_name
     model = AsymmetricCroCo3DStereo.from_pretrained(weights_path).to(args.device)
 
-    USE_LORA = True
+    USE_LORA = (args.lora_weight is not None)
     if USE_LORA:
         from torch import nn
         from dust3r.lora import LoraLayer, inject_lora
