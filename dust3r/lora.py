@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import math 
 
-LORA_ALPHA = 1    # LoRA's alpha scaling weight
+LORA_ALPHA = 4    # LoRA's alpha scaling weight
 LORA_R = 16       # LoRA rank (dimensionality of the low-rank matrices)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"  # Training device (CUDA GPU if available, else CPU)
 
