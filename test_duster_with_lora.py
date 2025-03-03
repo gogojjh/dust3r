@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
+
 import argparse
 import torch
 import logging
 from pathlib import Path
 from dust3r.inference import inference
 from dust3r.model import AsymmetricCroCo3DStereo
-from dust3r.utils.image import load_images, make_pairs
-from dust3r.image_pairs import GlobalAlignerMode, global_aligner
-from dust3r.utils import set_logging
+from dust3r.image_pairs import make_pairs
+from dust3r.utils.image import load_images
+from dust3r.cloud_opt import global_aligner, GlobalAlignerMode
 from dust3r.lora import LoraLayer, inject_lora
 
 class Dust3RPipeline:
@@ -61,12 +62,14 @@ class Dust3RPipeline:
             conf='log',
             calib_params=self.calib_params
         )
-        
+        ##### GlobalAlignerMode.ModularPointCloudOptimizer
+        # loss = scene.compute_global_alignment(init="mst", niter=niter, schedule=schedule, lr=lr)
+        ##### GlobalAlignerMode.PairViewer
+        scene = global_aligner(output, device=self.device, mode=GlobalAlignerMode.PairViewer)
+
         return scene
 
 def main():
-    set_logging(level=logging.INFO)
-    
     # Parse arguments
     parser = argparse.ArgumentParser(description='Dust3R with LoRA integration')
     parser.add_argument('--model_path', required=True, help='Path to base model weights')
@@ -94,7 +97,7 @@ def main():
         print(f"Estimated poses: {im_poses}")
         
         # You could add visualization or saving logic here
-        scene.show()
+        scene.show(cam_size=0.1)
         
     except Exception as e:
         logging.error(f"Processing failed: {str(e)}")
