@@ -205,15 +205,6 @@ def train(args):
     start_time = time.time()
     train_stats = test_stats = {}
 
-
-    lora_state = {}
-    for name, param in model_without_ddp.named_parameters():
-        if any(n == name.split('.')[-1] for n in ['lora_a', 'lora_b']):
-            lora_state[name] = param
-    torch.save(lora_state, os.path.join(args.output_dir, 'lora.pt'))
-    print(f"Epoch: {0}")
-    print(lora_state[next(iter(lora_state))])
-
     for epoch in range(args.start_epoch, args.epochs + 1):
         # Save immediately the last checkpoint
         if epoch > args.start_epoch:
