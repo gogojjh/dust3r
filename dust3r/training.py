@@ -131,24 +131,21 @@ def train(args):
     print(f'>> Creating test criterion = {args.test_criterion or args.train_criterion}')
     test_criterion = eval(args.test_criterion or args.criterion).to(device)
 
-    model.to(device)
-    
     ######################################### NOTE(gogojjh): LoRA
     for name, layer in model.named_modules():
-        name_cols = name.split('.')
         # Retrieve all linear layer in cross attention
         # For each linear layer, change y=WX to y=WX + WaWbX
-        filter_names = ['qkv']
-        if any(n in name_cols for n in filter_names) and isinstance(layer, nn.Linear):
+        if any(n in name.split('.') for n in ['qkv']) and isinstance(layer, nn.Linear):
             inject_lora(model, name, layer)
-    
+
     for name, param in model.named_parameters():
         if name.split('.')[-1] not in ['lora_a','lora_b']: # Not compute gradient for non-LoRA part
             param.requires_grad = False
         else:
             param.requires_grad = True
-    #########################################
+    #########################################  
 
+    model.to(device)
     model_without_ddp = model
     print("Model = %s" % str(model_without_ddp))
 
@@ -207,21 +204,31 @@ def train(args):
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     train_stats = test_stats = {}
+
+
+    lora_state = {}
+    for name, param in model_without_ddp.named_parameters():
+        if any(n == name.split('.')[-1] for n in ['lora_a', 'lora_b']):
+            lora_state[name] = param
+    torch.save(lora_state, os.path.join(args.output_dir, 'lora.pt'))
+    print(f"Epoch: {0}")
+    print(lora_state[next(iter(lora_state))])
+
     for epoch in range(args.start_epoch, args.epochs + 1):
         # Save immediately the last checkpoint
         if epoch > args.start_epoch:
             if args.save_freq and epoch % args.save_freq == 0 or epoch == args.epochs:
                 save_model(epoch - 1, 'last', best_so_far)
                 
-                ######################################### NOTE(gogojjh): LoRA
-                lora_state = {}
-                for name, param in model_without_ddp.named_parameters():
-                    name_cols = name.split('.')
-                    filter_names = ['lora_a','lora_b']
-                    if any(n == name_cols[-1] for n in filter_names):
-                        lora_state[name] = param
-                torch.save(lora_state, os.path.join(args.output_dir, 'lora.pt'))
-                #########################################
+            ######################################### NOTE(gogojjh): Store LoRA weights
+            lora_state = {}
+            for name, param in model_without_ddp.named_parameters():
+                if any(n == name.split('.')[-1] for n in ['lora_a', 'lora_b']):
+                    lora_state[name] = param
+            torch.save(lora_state, os.path.join(args.output_dir, 'lora.pt'))
+            print(f"Epoch: {epoch}")
+            print(lora_state[next(iter(lora_state))])
+            #########################################
                 
         # Test on multiple datasets
         new_best = False
