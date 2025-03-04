@@ -115,9 +115,6 @@ class BasePCOptimizer (nn.Module):
 		self.weight_j = nn.ParameterDict({ij: nn.Parameter(torch.ones_like(pred2_conf[n]), requires_grad=False) 
 										  for n, ij in enumerate(self.str_edges)})        
 		if self.calib_params is not None:
-			# The hyper-parameter is related to the scale
-			# Scale-specific:  1
-			# scale-ambiguous: 0.01
 			self.MU = self.calib_params['mu']
 			self.CONF_THRE = self.calib_params['conf_thre']
 			self.PSEUDO_GT_THRE = self.calib_params['pseudo_gt_thre']

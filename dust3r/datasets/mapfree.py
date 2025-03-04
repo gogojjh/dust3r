@@ -27,7 +27,7 @@ class MapFree(BaseStereoViewDataset):
 
 	def _load_pairs_and_scenes(self):
 		# Load predefined pairs and organize scene data
-		self.pairs = np.load(osp.join(self.ROOT, self.split, 'mapfree_pairs.npy'))
+		self.pairs = np.load(osp.join(self.ROOT, 'finetune', 'mapfree_pairs.npy'))
 		self.scene_paths = {scene: osp.join(self.ROOT, self.split, scene) 
 							for scene in np.unique(self.pairs['scene_name'])}
 		
@@ -122,7 +122,7 @@ if __name__ == '__main__':
 	# NOTE(gogojjh): Users should specify the split name for training
 	dataset = MapFree(
 		ROOT="data/mapfree_processed",  # Path to MapFree data
-		split='train',      # Use test split
+		split='test',                   # Use finetune split
 		resolution=224,                 # Target resolution
 		aug_crop=16                     # Augmentation crop size (if needed)
 	)
