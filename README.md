@@ -1,3 +1,9 @@
+
+## Fine-tune Dust3R using [LoRA (Low-Rank Adaptation)](https://arxiv.org/abs/2106.09685) and [LoRA3D](https://openreview.net/forum?id=LSp4KBhAom)
+Please check [README.md](test_lora/README.md) for the instruction
+
+
+---
 ![demo](assets/dust3r.jpg)
 
 Official implementation of `DUSt3R: Geometric 3D Vision Made Easy`  

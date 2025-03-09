@@ -22,7 +22,7 @@ torch.backends.cuda.matmul.allow_tf32 = True  # for gpu >= Ampere and pytorch >=
 
 if __name__ == '__main__':
     parser = get_args_parser()
-    parser.add_argument("--lora_weight", type=str, default=None, help="LoRA weight")
+    parser.add_argument("--lora_path", type=str, default=None, help="LoRA weight")
     args = parser.parse_args()
     set_print_with_timestamp()
 
@@ -42,7 +42,7 @@ if __name__ == '__main__':
         weights_path = "naver/" + args.model_name
     model = AsymmetricCroCo3DStereo.from_pretrained(weights_path).to(args.device)
 
-    USE_LORA = (args.lora_weight is not None)
+    USE_LORA = (args.lora_path is not None)
     if USE_LORA:
         from torch import nn
         from dust3r.lora import LoraLayer, inject_lora
@@ -55,7 +55,7 @@ if __name__ == '__main__':
                 inject_lora(model, name, layer)
 
         try:
-            restore_lora_state = torch.load(args.lora_weight)
+            restore_lora_state = torch.load(args.lora_path)
             model.load_state_dict(restore_lora_state, strict=False)
             print('Finish loading LoRA weights')
             print('Number of LoRA  Parameters: ', sum(param.numel() for param in restore_lora_state.values()))
@@ -73,8 +73,8 @@ if __name__ == '__main__':
                 cur_layer = model 
                 for child in children:
                     cur_layer = getattr(cur_layer,child)  
-                lora_weight = (layer.lora_a @ layer.lora_b) * layer.alpha / layer.r
-                layer.raw_linear.weight = nn.Parameter(layer.raw_linear.weight.add(lora_weight.T)).to(args.device)
+                lora_path = (layer.lora_a @ layer.lora_b) * layer.alpha / layer.r
+                layer.raw_linear.weight = nn.Parameter(layer.raw_linear.weight.add(lora_path.T)).to(args.device)
                 setattr(cur_layer, name_cols[-1], layer.raw_linear)
 
     # dust3r will write the 3D model inside tmpdirname

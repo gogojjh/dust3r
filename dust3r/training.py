@@ -131,7 +131,7 @@ def train(args):
     print(f'>> Creating test criterion = {args.test_criterion or args.train_criterion}')
     test_criterion = eval(args.test_criterion or args.criterion).to(device)
 
-    ######################################### NOTE(gogojjh): LoRA
+    ######################################### NOTE(gogojjh): inject LoRA layer
     for name, layer in model.named_modules():
         # Retrieve all linear layer in cross attention
         # For each linear layer, change y=WX to y=WX + WaWbX
