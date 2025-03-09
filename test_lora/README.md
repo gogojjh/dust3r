@@ -69,6 +69,7 @@ python test_lora/run_duster_with_lora.py \
   --img1 assets/rgb_00000.jpg \
   --img2 assets/rgb_00001.jpg \
   --img3 assets/rgb_00002.jpg \
+  --save_conf_map results \
   --model_path DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth
 
 # With LoRA
@@ -76,6 +77,7 @@ python test_lora/run_duster_with_lora.py \
   --img1 assets/rgb_00000.jpg \
   --img2 assets/rgb_00001.jpg \
   --img3 assets/rgb_00002.jpg \
+  --save_conf_map results \
   --model_path DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth \  
   --lora_path assets/lora_pdepth.pt
 ```
