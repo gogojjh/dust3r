@@ -117,6 +117,12 @@ if __name__ == '__main__':
 	from dust3r.datasets.base.base_stereo_view_dataset import view_name
 	from dust3r.viz import SceneViz, auto_cam_size
 	from dust3r.utils.image import rgb
+	import random
+
+	SEED = 42 # Set constant random seed for reproducibility
+	random.seed(SEED)
+	np.random.seed(SEED)
+
 
 	# Initialize MapFree dataset
 	# NOTE(gogojjh): Users should specify the split name for training
@@ -130,6 +136,7 @@ if __name__ == '__main__':
 	# Visualize random samples
 	for idx in np.random.permutation(len(dataset)):
 		views = dataset[idx]
+		print(f"View: {views[0]['instance']} - View: {views[1]['instance']}")
 		assert len(views) == 2, "Each sample should contain 2 views"
 		# print(f"Sample {idx}: {view_name(views[0])} vs {view_name(views[1])}")
 		viz = SceneViz()

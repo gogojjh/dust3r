@@ -211,15 +211,13 @@ def train(args):
             if args.save_freq and epoch % args.save_freq == 0 or epoch == args.epochs:
                 save_model(epoch - 1, 'last', best_so_far)
                 
-            ######################################### NOTE(gogojjh): Store LoRA weights
-            lora_state = {}
-            for name, param in model_without_ddp.named_parameters():
-                if any(n == name.split('.')[-1] for n in ['lora_a', 'lora_b']):
-                    lora_state[name] = param
-            torch.save(lora_state, os.path.join(args.output_dir, 'lora.pt'))
-            print(f"Epoch: {epoch}")
-            print(lora_state[next(iter(lora_state))])
-            #########################################
+                ######################################### NOTE(gogojjh): Store LoRA weights
+                lora_state = {}
+                for name, param in model_without_ddp.named_parameters():
+                    if any(n == name.split('.')[-1] for n in ['lora_a', 'lora_b']):
+                        lora_state[name] = param
+                torch.save(lora_state, os.path.join(args.output_dir, 'lora.pt'))
+                #########################################
                 
         # Test on multiple datasets
         new_best = False

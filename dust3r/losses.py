@@ -191,9 +191,9 @@ class Regr3D (Criterion, MultiLoss):
         l2 = self.criterion(pred_pts2[mask2], gt_pts2[mask2])
         self_name = type(self).__name__
         details = {self_name + '_pts3d_1': float(l1.mean()), self_name + '_pts3d_2': float(l2.mean())}
-        # NOTE(gogojjh): Original
+        ##### NOTE(gogojjh): Original
         # return Sum((l1, mask1), (l2, mask2)), (details | monitoring)
-        # Python 3.8 compatible
+        ##### Python 3.8 compatible
         return Sum((l1, mask1), (l2, mask2)), ({**details, **monitoring})
 
 

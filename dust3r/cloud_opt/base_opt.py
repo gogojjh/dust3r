@@ -291,12 +291,10 @@ class BasePCOptimizer (nn.Module):
 
 				li = self.dist(proj_pts3d[i], aligned_pred_i, weight=self.weight_i[i_j]).mean()
 				lj = self.dist(proj_pts3d[j], aligned_pred_j, weight=self.weight_j[i_j]).mean()
-			else:
+			else:				
 				# set mask to inliers with high confidence
 				C_i = self.conf_trf(self.conf_i[i_j])
 				C_j = self.conf_trf(self.conf_j[i_j])
-				mask_i = C_i > self.CONF_THRE
-				mask_j = C_j > self.CONF_THRE
 
 				# compute pixel weights with calibration
 				aligned_pred_i = geotrf(pw_poses[e], pw_adapt[e] * self.pred_i[i_j]) # predicted point in the global coordinate
@@ -305,6 +303,8 @@ class BasePCOptimizer (nn.Module):
 				res_j = proj_pts3d[j] - aligned_pred_j
 				self.weight_i[i_j] = C_i / (1 + self.dist(res_i, zeros_NM3, ones_NM3[:, :, 1].squeeze()) / self.MU) ** 2
 				self.weight_j[i_j] = C_j / (1 + self.dist(res_j, zeros_NM3, ones_NM3[:, :, 1].squeeze()) / self.MU) ** 2
+				mask_i = self.weight_i[i_j] > self.CONF_THRE
+				mask_j = self.weight_j[i_j] > self.CONF_THRE
 
 				# Regularization term (μ*(√w_p - √C_p)^2)
 				reg_i = self.MU * (torch.sqrt(self.weight_i[i_j]) - torch.sqrt(C_i))**2
