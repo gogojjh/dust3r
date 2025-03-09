@@ -1,6 +1,6 @@
 
 ## Fine-tune Dust3R using [LoRA (Low-Rank Adaptation)](https://arxiv.org/abs/2106.09685) and [LoRA3D](https://openreview.net/forum?id=LSp4KBhAom)
-Please check [README.md](test_lora/README.md) for the instruction
+Please check [README.md](test_lora/README.md) for the instruction (switch ```lora_finetune``` branch)
 
 
 ---
