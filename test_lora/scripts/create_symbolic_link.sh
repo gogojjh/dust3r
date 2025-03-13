@@ -1,13 +1,12 @@
 #!/bin/bash
 
 DATASET_PATH=$1
-SCENE=$2
-SUFFIX=$3
+SUFFIX=$2
 
 # Check if all required arguments are provided
-if [ -z "$DATASET_PATH" ] || [ -z "$SCENE" ] || [ -z "$SUFFIX" ]; then
+if [ -z "$DATASET_PATH" ] || [ -z "$SUFFIX" ]; then
     echo "Error: DATASET_PATH, SCENE, SUFFIX are not specified."
-    echo "Usage: ./create_symbolic_link.sh <DATASET_PATH> <SCENE> <SUFFIX>"
+    echo "Usage: ./create_symbolic_link.sh <DATASET_PATH> <SUFFIX>"
     exit 1
 fi
 
@@ -18,7 +17,7 @@ fi
 ln -s "$DATASET_PATH" data/mapfree_processed
 
 # Create scene-specific pairs symlink
-TARGET_FILE="mapfree_pairs_${SCENE}_${SUFFIX}.npy"  # Fix variable interpolation
+TARGET_FILE="mapfree_pairs_${SUFFIX}.npy"  # Fix variable interpolation
 
 LINK_PATH="data/mapfree_processed/finetune/mapfree_pairs.npy"
 if [ -L "$LINK_PATH" ]; then
