@@ -24,14 +24,14 @@ TRAIN_ARGS=(
     "--test_criterion" "Regr3D_ScaleShiftInv(L21, gt_scale=False)"
     "--pretrained" "$PRETRAINED_MODEL"
     "--lr" "0.001"
-    "--min_lr" "0.000001"
+    "--min_lr" "1e-05"
     "--warmup_epochs" "0"
-    "--epochs" "30"
+    "--epochs" "20"
     "--batch_size" "2"
-    "--accum_iter" "8"
+    "--accum_iter" "2"
     "--save_freq" "0"
     "--keep_freq" "0"
-    "--eval_freq" "1"
+    "--eval_freq" "5"
     "--disable_cudnn_benchmark"
 )
 
