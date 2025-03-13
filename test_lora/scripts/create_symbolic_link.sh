@@ -23,5 +23,5 @@ LINK_PATH="data/mapfree_processed/train/mapfree_pairs.npy"
 if [ -L "$LINK_PATH" ]; then
     rm "$LINK_PATH"
 fi
-ln -s "$DATASET_PATH/finetune/pairs/$TARGET_FILE" "$LINK_PATH"
-echo "Created symbolic link: $LINK_PATH -> $DATASET_PATH/finetune/pairs/$TARGET_FILE"
+ln -s "$DATASET_PATH/finetune_duster_calib_pretrain/pairs/$TARGET_FILE" "$LINK_PATH"
+echo "Created symbolic link: $LINK_PATH -> $DATASET_PATH/finetune_duster_calib_pretrain/pairs/$TARGET_FILE"
