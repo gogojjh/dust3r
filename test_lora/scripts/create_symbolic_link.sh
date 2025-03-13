@@ -19,7 +19,7 @@ ln -s "$DATASET_PATH" data/mapfree_processed
 # Create scene-specific pairs symlink
 TARGET_FILE="mapfree_pairs_${SUFFIX}.npy"  # Fix variable interpolation
 
-LINK_PATH="data/mapfree_processed/finetune/mapfree_pairs.npy"
+LINK_PATH="data/mapfree_processed/train/mapfree_pairs.npy"
 if [ -L "$LINK_PATH" ]; then
     rm "$LINK_PATH"
 fi
