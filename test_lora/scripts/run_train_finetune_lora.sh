@@ -1,16 +1,15 @@
 #!/bin/bash
 
 # Check if all required arguments are provided
-if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ]; then
+if [ -z "$1" ] || [ -z "$2" ]; then
     echo "Error: DATASET_PATH, DATASET_NAME, SCENE are not specified."
-    echo "Usage: ./run_train_finetune_lora.sh <DATASET_PATH> <DATASET_NAME> <SCENE>"
+    echo "Usage: ./run_train_finetune_lora.sh <DATASET_PATH> <DATASET_NAME>"
     exit 1
 fi
 
 # Assign arguments to variables
 DATASET_PATH=$1
 DATASET_NAME=$2
-SCENE=$3
 SUFFIXES=("pdepth" "gtdepth")
 MODEL_WEIGHTS_DIR="/Rocket_ssd/image_matching_model_weights"
 PRETRAINED_MODEL="$MODEL_WEIGHTS_DIR/DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth"
@@ -26,7 +25,7 @@ TRAIN_ARGS=(
     "--lr" "0.001"
     "--min_lr" "0.000001"
     "--warmup_epochs" "0"
-    "--epochs" "20"
+    "--epochs" "30"
     "--batch_size" "2"
     "--accum_iter" "8"
     "--save_freq" "0"
@@ -52,7 +51,7 @@ for SUFFIX in "${SUFFIXES[@]}"; do
     ln -s "${DATASET_PATH}/finetune/pairs/mapfree_pairs_${SCENE}_${SUFFIX}.npy" "${DATASET_PATH}/train/mapfree_pairs.npy"
     
     # Training command
-    OUTPUT_DIR="${MODEL_WEIGHTS_DIR}/dust3r_${DATASET_NAME}_${SCENE}_512dpt_calib_ftlora_${SUFFIX}_lora4_lr0001_512"
+    OUTPUT_DIR="${MODEL_WEIGHTS_DIR}/dust3r_${DATASET_NAME}_512dpt_calib_ftlora_${SUFFIX}_lora4_lr0001_512"
     python train.py "${TRAIN_ARGS[@]}" --output_dir "$OUTPUT_DIR"
     
     # Post-processing

@@ -111,7 +111,7 @@ class BasePCOptimizer (nn.Module):
 		# add weight as the learned parameters
 		self.calib_params = calib_params
 		self.weight_i = nn.ParameterDict({ij: nn.Parameter(torch.ones_like(pred1_conf[n]), requires_grad=False) 
-									      for n, ij in enumerate(self.str_edges)})
+										  for n, ij in enumerate(self.str_edges)})
 		self.weight_j = nn.ParameterDict({ij: nn.Parameter(torch.ones_like(pred2_conf[n]), requires_grad=False) 
 										  for n, ij in enumerate(self.str_edges)})        
 		if self.calib_params is not None:
@@ -258,6 +258,7 @@ class BasePCOptimizer (nn.Module):
 			self.im_conf[i].data[:] = new_conf
 		return self
 
+	@torch.cuda.amp.autocast(enabled=True)
 	def forward(self, ret_details=False):
 		"""
 		Performs the forward pass of the optimization process.
