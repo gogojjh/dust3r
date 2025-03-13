@@ -10,7 +10,8 @@ fi
 # Assign arguments to variables
 DATASET_PATH=$1
 DATASET_NAME=$2
-SUFFIXES=("pdepth" "gtdepth")
+# SUFFIXES=("pdepth" "gtdepth")
+SUFFIXES=("pdepth")
 MODEL_WEIGHTS_DIR="/Rocket_ssd/image_matching_model_weights"
 PRETRAINED_MODEL="$MODEL_WEIGHTS_DIR/DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth"
 

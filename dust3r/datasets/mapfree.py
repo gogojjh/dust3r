@@ -36,7 +36,7 @@ class MapFree(BaseStereoViewDataset):
 		for scene_name, scene_path in self.scene_paths.items():
 			self.scene_data[scene_name] = {
 				'intrinsics': self._load_intrinsics(osp.join(scene_path, 'intrinsics.txt')),
-				'poses': self._load_poses(osp.join(scene_path, 'poses.txt'))
+				'poses': self._load_poses(osp.join(scene_path, 'poses_pseudo.txt'))
 			}
 
 	def _load_intrinsics(self, path):
