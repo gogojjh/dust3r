@@ -39,7 +39,7 @@ if [ -L "data/mapfree_processed" ]; then
     rm "data/mapfree_processed"
 fi    
 ln -s "$DATASET_PATH" data/mapfree_processed
-mkdir -p "${DATASET_PATH}/finetune_duster/weights"
+mkdir -p "${DATASET_PATH}/finetune_duster_calib_pretrain/weights"
 
 # Start training
 for SUFFIX in "${SUFFIXES[@]}"; do
@@ -48,7 +48,7 @@ for SUFFIX in "${SUFFIXES[@]}"; do
     if [ -L "${DATASET_PATH}/train/mapfree_pairs.npy" ]; then
         rm "${DATASET_PATH}/train/mapfree_pairs.npy"
     fi    
-    ln -s "${DATASET_PATH}/finetune_duster/pairs/mapfree_pairs_${SCENE}_${SUFFIX}.npy" "${DATASET_PATH}/train/mapfree_pairs.npy"
+    ln -s "${DATASET_PATH}/finetune_duster_calib_pretrain/pairs/mapfree_pairs_${SCENE}_${SUFFIX}.npy" "${DATASET_PATH}/train/mapfree_pairs.npy"
     
     # Training command
     OUTPUT_DIR="${MODEL_WEIGHTS_DIR}/dust3r_${DATASET_NAME}_512dpt_calib_ftlora_${SUFFIX}_lora4_lr0001_512"
@@ -56,7 +56,7 @@ for SUFFIX in "${SUFFIXES[@]}"; do
     
     # Post-processing
     rm "$OUTPUT_DIR"/*.pth
-    cp "$OUTPUT_DIR/lora.pt" "${DATASET_PATH}/finetune_duster/weights/duster_lora_${SCENE}_${SUFFIX}.pt"
+    cp "$OUTPUT_DIR/lora.pt" "${DATASET_PATH}/finetune_duster_calib_pretrain/weights/duster_lora_${SCENE}_${SUFFIX}.pt"
     rm "${DATASET_PATH}/train/mapfree_pairs.npy"
     
     echo "Completed processing ${SUFFIX}"
