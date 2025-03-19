@@ -118,6 +118,7 @@ class BasePCOptimizer (nn.Module):
 			self.MU = self.calib_params['mu']
 			self.CONF_THRE = self.calib_params['conf_thre']
 			self.PSEUDO_GT_THRE = self.calib_params['pseudo_gt_thre']
+			self.USE_WEIGHT_OPT = self.calib_params['use_weight_opt']
 
 	@property
 	def n_edges(self):
@@ -283,13 +284,10 @@ class BasePCOptimizer (nn.Module):
 		for e, (i, j) in enumerate(self.edges):
 			i_j = edge_str(i, j)
 			if self.calib_params is None:
-				# compute pixel weights
 				self.weight_i[i_j] = self.conf_trf(self.conf_i[i_j])
 				self.weight_j[i_j] = self.conf_trf(self.conf_j[i_j])				
-
 				aligned_pred_i = geotrf(pw_poses[e], pw_adapt[e] * self.pred_i[i_j]) # predicted point in the global coordinate
 				aligned_pred_j = geotrf(pw_poses[e], pw_adapt[e] * self.pred_j[i_j])
-
 				li = self.dist(proj_pts3d[i], aligned_pred_i, weight=self.weight_i[i_j]).mean()
 				lj = self.dist(proj_pts3d[j], aligned_pred_j, weight=self.weight_j[i_j]).mean()
 			else:				
@@ -304,23 +302,27 @@ class BasePCOptimizer (nn.Module):
 				res_j = proj_pts3d[j] - aligned_pred_j
 				self.weight_i[i_j] = C_i / (1 + self.dist(res_i, zeros_NM3, ones_NM3[:, :, 1].squeeze()) / self.MU) ** 2
 				self.weight_j[i_j] = C_j / (1 + self.dist(res_j, zeros_NM3, ones_NM3[:, :, 1].squeeze()) / self.MU) ** 2
-				mask_i = self.weight_i[i_j] > self.CONF_THRE
-				mask_j = self.weight_j[i_j] > self.CONF_THRE
-
-				# Regularization term (μ*(√w_p - √C_p)^2)
-				reg_i = self.MU * (torch.sqrt(self.weight_i[i_j]) - torch.sqrt(C_i))**2
-				reg_j = self.MU * (torch.sqrt(self.weight_j[i_j]) - torch.sqrt(C_j))**2
 				
-				# Avoid zero masked element to cause NaN
-				li = self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i]).mean() + reg_i[mask_i].mean()
-				if torch.isnan(li).any(): li = torch.tensor(0)
-				lj = self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j]).mean() + reg_j[mask_j].mean()
-				if torch.isnan(lj).any(): lj = torch.tensor(0)
+				if self.USE_WEIGHT_OPT:
+					mask_i = self.weight_i[i_j] > self.CONF_THRE
+					mask_j = self.weight_j[i_j] > self.CONF_THRE
+					# Regularization term (μ*(√w_p - √C_p)^2)
+					reg_i = self.MU * (torch.sqrt(self.weight_i[i_j]) - torch.sqrt(C_i))**2
+					reg_j = self.MU * (torch.sqrt(self.weight_j[i_j]) - torch.sqrt(C_j))**2
+					# Avoid zero masked element to cause NaN
+					li = self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i]).mean() + reg_i[mask_i].mean()
+					if torch.isnan(li).any(): li = torch.tensor(0)
+					lj = self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j]).mean() + reg_j[mask_j].mean()
+					if torch.isnan(lj).any(): lj = torch.tensor(0)
+				else:
+					li = self.dist(proj_pts3d[i], aligned_pred_i, weight=C_i).mean()
+					lj = self.dist(proj_pts3d[j], aligned_pred_j, weight=C_j).mean()
 
 			loss = loss + li + lj
 
 			if ret_details:
 				details[i, j] = li + lj
+
 		loss /= self.n_edges  # average over all pairs
 
 		if ret_details:
