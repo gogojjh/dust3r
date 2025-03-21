@@ -17,8 +17,8 @@ PRETRAINED_MODEL="$MODEL_WEIGHTS_DIR/DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth"
 
 # Training hyperparameters
 TRAIN_ARGS=(
-    "--train_dataset" "100 @ MapFree(split='train', ROOT='$DATASET_PATH/', aug_crop=16, resolution=[(512, 288)], transform=ColorJitter)"
-    "--test_dataset" "1 @ MapFree(split='train', ROOT='$DATASET_PATH/', resolution=[(512, 288)], seed=777)"
+    "--train_dataset" "1000 @ MapFree(split='train', ROOT='$DATASET_PATH/', aug_crop=16, resolution=[(512, 288)], transform=ColorJitter)"
+    "--test_dataset" "100 @ MapFree(split='train', ROOT='$DATASET_PATH/', resolution=[(512, 288)], seed=777)"
     "--model" "AsymmetricCroCo3DStereo(pos_embed='RoPE100', patch_embed_cls='ManyAR_PatchEmbed', img_size=(512, 512), head_type='dpt', output_mode='pts3d', depth_mode=('exp', -inf, inf), conf_mode=('exp', 1, inf), enc_embed_dim=1024, enc_depth=24, enc_num_heads=16, dec_embed_dim=768, dec_depth=12, dec_num_heads=12)"
     "--train_criterion" "ConfLoss(Regr3D(L21, norm_mode='avg_dis'), alpha=0.2)"
     "--test_criterion" "Regr3D_ScaleShiftInv(L21, gt_scale=False)"
