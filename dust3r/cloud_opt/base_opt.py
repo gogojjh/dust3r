@@ -271,8 +271,8 @@ class BasePCOptimizer (nn.Module):
 			float or tuple: The loss value if `ret_details` is False, otherwise a tuple containing the loss value and details.
 		"""
 		pw_poses = self.get_pw_poses()  # cam-to-world
-		pw_adapt = self.get_adaptors()
-		proj_pts3d = self.get_pts3d()                                               # optimized point in the global coordinate
+		pw_adapt = self.get_adaptors()  # scale and adapt the pointmap
+		proj_pts3d = self.get_pts3d()   # optimized point in the global coordinate
 
 		loss = 0
 		if ret_details:
@@ -281,20 +281,20 @@ class BasePCOptimizer (nn.Module):
 		zeros_NM3 = torch.zeros_like(proj_pts3d[0])
 		ones_NM3  = torch.ones_like(proj_pts3d[0])
 
+		print(f"Edges: {self.edges}")
 		for e, (i, j) in enumerate(self.edges):
 			i_j = edge_str(i, j)
 			if self.calib_params is None:
 				self.weight_i[i_j] = self.conf_trf(self.conf_i[i_j])
 				self.weight_j[i_j] = self.conf_trf(self.conf_j[i_j])				
-				aligned_pred_i = geotrf(pw_poses[e], pw_adapt[e] * self.pred_i[i_j]) # predicted point in the global coordinate
-				aligned_pred_j = geotrf(pw_poses[e], pw_adapt[e] * self.pred_j[i_j])
+				aligned_pred_i = geotrf(pw_poses[e], pw_adapt[e] * self.pred_i[i_j]) # predicted point of view_i in view_i in the global coordinate
+				aligned_pred_j = geotrf(pw_poses[e], pw_adapt[e] * self.pred_j[i_j]) # predicted point of view_j in view_i in the global coordinate
 				li = self.dist(proj_pts3d[i], aligned_pred_i, weight=self.weight_i[i_j]).mean()
 				lj = self.dist(proj_pts3d[j], aligned_pred_j, weight=self.weight_j[i_j]).mean()
 			else:				
 				# set mask to inliers with high confidence
 				C_i = self.conf_trf(self.conf_i[i_j])
 				C_j = self.conf_trf(self.conf_j[i_j])
-
 				# compute pixel weights with calibration
 				aligned_pred_i = geotrf(pw_poses[e], pw_adapt[e] * self.pred_i[i_j]) # predicted point in the global coordinate
 				aligned_pred_j = geotrf(pw_poses[e], pw_adapt[e] * self.pred_j[i_j])
@@ -310,9 +310,9 @@ class BasePCOptimizer (nn.Module):
 					reg_i = self.MU * (torch.sqrt(self.weight_i[i_j]) - torch.sqrt(C_i))**2
 					reg_j = self.MU * (torch.sqrt(self.weight_j[i_j]) - torch.sqrt(C_j))**2
 					# Avoid zero masked element to cause NaN
-					li = self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i]).mean() + reg_i[mask_i].mean()
+					li = (self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i]) + reg_i[mask_i]).mean()
 					if torch.isnan(li).any(): li = torch.tensor(0)
-					lj = self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j]).mean() + reg_j[mask_j].mean()
+					lj = (self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j]) + reg_j[mask_j]).mean()
 					if torch.isnan(lj).any(): lj = torch.tensor(0)
 				else:
 					li = self.dist(proj_pts3d[i], aligned_pred_i, weight=C_i).mean()
