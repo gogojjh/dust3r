@@ -114,11 +114,14 @@ class BasePCOptimizer (nn.Module):
 										  for n, ij in enumerate(self.str_edges)})
 		self.weight_j = nn.ParameterDict({ij: nn.Parameter(torch.ones_like(pred2_conf[n]), requires_grad=False) 
 										  for n, ij in enumerate(self.str_edges)})        
+		self.USE_ALT_OPT = False
+		self.loss_log = []
 		if self.calib_params is not None:
 			self.MU = self.calib_params['mu']
 			self.CONF_THRE = self.calib_params['conf_thre']
 			self.PSEUDO_GT_THRE = self.calib_params['pseudo_gt_thre']
-			self.USE_WEIGHT_OPT = self.calib_params['use_weight_opt']
+			self.USE_WEIGHT_OPT = self.calib_params['use_weight_opt'] # default: False
+			self.USE_ALT_OPT = self.calib_params['use_alt_opt'] # default: False
 
 	@property
 	def n_edges(self):
@@ -281,7 +284,6 @@ class BasePCOptimizer (nn.Module):
 		zeros_NM3 = torch.zeros_like(proj_pts3d[0])
 		ones_NM3  = torch.ones_like(proj_pts3d[0])
 
-		print(f"Edges: {self.edges}")
 		for e, (i, j) in enumerate(self.edges):
 			i_j = edge_str(i, j)
 			if self.calib_params is None:
@@ -302,21 +304,23 @@ class BasePCOptimizer (nn.Module):
 				res_j = proj_pts3d[j] - aligned_pred_j
 				self.weight_i[i_j] = C_i / (1 + self.dist(res_i, zeros_NM3, ones_NM3[:, :, 1].squeeze()) / self.MU) ** 2
 				self.weight_j[i_j] = C_j / (1 + self.dist(res_j, zeros_NM3, ones_NM3[:, :, 1].squeeze()) / self.MU) ** 2
+				li = self.dist(proj_pts3d[i], aligned_pred_i, weight=self.weight_i[i_j]).mean()
+				lj = self.dist(proj_pts3d[j], aligned_pred_j, weight=self.weight_i[i_j]).mean()
 				
-				if self.USE_WEIGHT_OPT:
-					mask_i = self.weight_i[i_j] > self.CONF_THRE
-					mask_j = self.weight_j[i_j] > self.CONF_THRE
-					# Regularization term (μ*(√w_p - √C_p)^2)
-					reg_i = self.MU * (torch.sqrt(self.weight_i[i_j]) - torch.sqrt(C_i))**2
-					reg_j = self.MU * (torch.sqrt(self.weight_j[i_j]) - torch.sqrt(C_j))**2
-					# Avoid zero masked element to cause NaN
-					li = (self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i]) + reg_i[mask_i]).mean()
-					if torch.isnan(li).any(): li = torch.tensor(0)
-					lj = (self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j]) + reg_j[mask_j]).mean()
-					if torch.isnan(lj).any(): lj = torch.tensor(0)
-				else:
-					li = self.dist(proj_pts3d[i], aligned_pred_i, weight=C_i).mean()
-					lj = self.dist(proj_pts3d[j], aligned_pred_j, weight=C_j).mean()
+				# if self.USE_WEIGHT_OPT:
+				# 	mask_i = self.weight_i[i_j] > self.CONF_THRE
+				# 	mask_j = self.weight_j[i_j] > self.CONF_THRE
+				# 	# Regularization term (μ*(√w_p - √C_p)^2)
+				# 	reg_i = self.MU * (torch.sqrt(self.weight_i[i_j]) - torch.sqrt(C_i))**2
+				# 	reg_j = self.MU * (torch.sqrt(self.weight_j[i_j]) - torch.sqrt(C_j))**2
+				# 	# Avoid zero masked element to cause NaN
+				# 	li = (self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i]) + reg_i[mask_i]).mean()
+				# 	if torch.isnan(li).any(): li = torch.tensor(0)
+				# 	lj = (self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j]) + reg_j[mask_j]).mean()
+				# 	if torch.isnan(lj).any(): lj = torch.tensor(0)
+				# else:
+				# 	li = self.dist(proj_pts3d[i], aligned_pred_i, weight=self.weight_i[i_j]).mean()
+				# 	lj = self.dist(proj_pts3d[j], aligned_pred_j, weight=self.weight_i[i_j]).mean()
 
 			loss = loss + li + lj
 
@@ -327,6 +331,7 @@ class BasePCOptimizer (nn.Module):
 
 		if ret_details:
 			return loss, details
+		
 		return loss
 
 	@torch.cuda.amp.autocast(enabled=False)
@@ -379,43 +384,95 @@ class BasePCOptimizer (nn.Module):
 		viz.show(**kw)
 		return viz
 
-def global_alignment_loop(net, lr=0.01, niter=300, schedule='cosine', lr_min=1e-6):
-	"""
-	Performs global alignment optimization loop.
+# NOTE(gogojjh): alternative optimization for depthmap and other parameters
+def global_alignment_loop(net, lr=0.01, niter=300, schedule='cosine', lr_min=1e-6, alt_interval=10):
+	# Parameters to be optimized:
+	# pw_poses pw_adaptors pred_i pred_j conf_i conf_j im_conf weight_i weight_j
+	# im_depthmaps im_poses im_focals im_pp
+	# print('All parameters: ' + ' '.join(name for name, _ in net.named_parameters()))
+	net.loss_log = []
 
-	Args:
-		net (nn.Module): The neural network model.
-		lr (float): The learning rate for optimization (default: 0.01).
-		niter (int): The number of iterations for optimization (default: 300).
-		schedule (str): The learning rate schedule (default: 'cosine').
-		lr_min (float): The minimum learning rate (default: 1e-6).
-
-	Returns:
-		float: The final loss value after optimization.
-	"""
 	params = [p for p in net.parameters() if p.requires_grad]
 	if not params:
 		return net
 
 	verbose = net.verbose
+	use_alt = getattr(net, 'USE_ALT_OPT', False)
+
 	if verbose:
-		print('Global alignment - optimizing for:')
+		if use_alt:
+			print('Global alignment - alternating optimization (depthmap vs others):')
+		else:
+			print('Global alignment - standard optimization:')
 		print([name for name, value in net.named_parameters() if value.requires_grad])
 
-	lr_base = lr
-	optimizer = torch.optim.Adam(params, lr=lr, betas=(0.9, 0.9))
-
 	loss = float('inf')
-	if verbose:
-		with tqdm.tqdm(total=niter) as bar:
-			while bar.n < bar.total:
-				loss, lr = global_alignment_iter(net, bar.n, niter, lr_base, lr_min, optimizer, schedule)
-				bar.set_postfix_str(f'{lr=:g} loss={loss:g}')
-				bar.update()
+
+	if not use_alt:
+		optimizer = torch.optim.Adam(params, lr=lr, betas=(0.9, 0.9))
+		if verbose:
+			with tqdm.tqdm(total=niter) as bar:
+				while bar.n < bar.total:
+					loss, lr = global_alignment_iter(net, bar.n, niter, lr, lr_min, optimizer, schedule)
+					net.loss_log.append((bar.n, float(loss)))
+					bar.set_postfix_str(f'{lr=:g} loss={loss:g}')
+					bar.update()
+		else:
+			for n in range(niter):
+				loss, _ = global_alignment_iter(net, n, niter, lr, lr_min, optimizer, schedule)
+				net.loss_log.append((n, float(loss)))
 	else:
-		for n in range(niter):
-			loss, _ = global_alignment_iter(net, n, niter, lr_base, lr_min, optimizer, schedule)
+		params_group0, params_group1 = [], []
+		for name, param in net.named_parameters():
+			if not param.requires_grad:
+				continue
+			if 'im_depthmaps' in name:
+				params_group0.append(param)
+			else:
+				params_group1.append(param)
+
+		if verbose:
+			with tqdm.tqdm(total=niter) as bar:
+				while bar.n < bar.total:
+					if (bar.n // alt_interval) % 2 == 0:
+						# Optimize params_group1
+						for p in params_group0:
+							p.requires_grad = False
+						for p in params_group1:
+							p.requires_grad = True
+						opt = torch.optim.Adam([p for p in params_group1 if p.requires_grad], lr=lr)
+					else:
+						# Optimize params_group0
+						for p in params_group0:
+							p.requires_grad = True
+						for p in params_group1:
+							p.requires_grad = False
+						opt = torch.optim.Adam([p for p in params_group0 if p.requires_grad], lr=lr)
+
+					loss, lr = global_alignment_iter(net, bar.n, niter, lr, lr_min, opt, schedule)
+					net.loss_log.append((bar.n, float(loss)))
+					bar.set_postfix_str(f'{lr=:g} loss={loss:g}')
+					bar.update()
+		else:
+			for n in range(niter):
+				if (n // alt_interval) % 2 == 0:
+					for p in params_group0:
+						p.requires_grad = False
+					for p in params_group1:
+						p.requires_grad = True
+					opt = torch.optim.Adam([p for p in params_group1 if p.requires_grad], lr=lr)
+				else:
+					for p in params_group0:
+						p.requires_grad = True
+					for p in params_group1:
+						p.requires_grad = False
+					opt = torch.optim.Adam([p for p in params_group0 if p.requires_grad], lr=lr)
+
+				loss, _ = global_alignment_iter(net, n, niter, lr, lr_min, opt, schedule)
+				net.loss_log.append((n, float(loss)))
+
 	return loss
+
 
 def global_alignment_iter(net, cur_iter, niter, lr_base, lr_min, optimizer, schedule):
 	"""
