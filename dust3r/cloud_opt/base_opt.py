@@ -302,31 +302,33 @@ class BasePCOptimizer (nn.Module):
 				aligned_pred_j = geotrf(pw_poses[e], pw_adapt[e] * self.pred_j[i_j])
 				res_i = proj_pts3d[i] - aligned_pred_i
 				res_j = proj_pts3d[j] - aligned_pred_j
-				# compute pixel weights with calibration
-				self.weight_i[i_j] = C_i / (1 + self.dist(res_i, zeros_NM3, ones_NM3[:, :, 1].squeeze()) / self.MU) ** 2
-				self.weight_j[i_j] = C_j / (1 + self.dist(res_j, zeros_NM3, ones_NM3[:, :, 1].squeeze()) / self.MU) ** 2
-				# set mask to inliers with high confidence
-				mask_i = res_i < self.CONF_THRE
-				mask_j = res_j < self.CONF_THRE
-				li = (self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i])).mean()
-				if torch.isnan(li).any(): li = torch.tensor(0)
-				lj = (self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j])).mean()
-				if torch.isnan(lj).any(): lj = torch.tensor(0)				
-
-				# if self.USE_WEIGHT_OPT:
-				# 	mask_i = self.weight_i[i_j] > self.CONF_THRE
-				# 	mask_j = self.weight_j[i_j] > self.CONF_THRE
-				# 	# Regularization term (μ*(√w_p - √C_p)^2)
-				# 	reg_i = self.MU * (torch.sqrt(self.weight_i[i_j]) - torch.sqrt(C_i))**2
-				# 	reg_j = self.MU * (torch.sqrt(self.weight_j[i_j]) - torch.sqrt(C_j))**2
-				# 	# Avoid zero masked element to cause NaN
-				# 	li = (self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i]) + reg_i[mask_i]).mean()
-				# 	if torch.isnan(li).any(): li = torch.tensor(0)
-				# 	lj = (self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j]) + reg_j[mask_j]).mean()
-				# 	if torch.isnan(lj).any(): lj = torch.tensor(0)
-				# else:
-				# 	li = self.dist(proj_pts3d[i], aligned_pred_i, weight=self.weight_i[i_j]).mean()
-				# 	lj = self.dist(proj_pts3d[j], aligned_pred_j, weight=self.weight_i[i_j]).mean()
+				# Compute the norm of residuals (L2 norm across the last dimension)
+				res_i_norm = torch.norm(res_i, dim=-1)  # Shape: (512, 288)
+				res_j_norm = torch.norm(res_j, dim=-1)  # Shape: (512, 288)
+				# Compute weights using the calibrated confidence and residual norms
+				self.weight_i[i_j] = C_i / (1 + res_i_norm / self.MU) ** 2
+				self.weight_j[i_j] = C_j / (1 + res_j_norm / self.MU) ** 2
+				# print(f"weight_i max: {self.weight_i[i_j].max():.6f}, min: {self.weight_i[i_j].min():.6f}")
+				# print(f"weight_j max: {self.weight_j[i_j].max():.6f}, min: {self.weight_j[i_j].min():.6f}")
+				if self.USE_WEIGHT_OPT:
+					# set mask to inliers with high confidence
+					mask_i = self.weight_i[i_j] > self.CONF_THRE
+					mask_j = self.weight_j[i_j] > self.CONF_THRE
+					# Regularization term (μ*(√w_p - √C_p)^2)
+					# reg_i = self.MU * (torch.sqrt(self.weight_i[i_j]) - torch.sqrt(C_i))**2
+					# reg_j = self.MU * (torch.sqrt(self.weight_j[i_j]) - torch.sqrt(C_j))**2
+					# # Avoid zero masked element to cause NaN
+					# li = (self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i]) + reg_i[mask_i]).mean()
+					# if torch.isnan(li).any(): li = torch.tensor(0)
+					# lj = (self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j]) + reg_j[mask_j]).mean()
+					# if torch.isnan(lj).any(): lj = torch.tensor(0)
+					li = (self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i])).mean()
+					if torch.isnan(li).any(): li = torch.tensor(0)
+					lj = (self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j])).mean()
+					if torch.isnan(lj).any(): lj = torch.tensor(0)				
+				else:
+					li = self.dist(res_i, zeros_NM3, weight=self.weight_i[i_j]).mean()
+					lj = self.dist(res_j, zeros_NM3, weight=self.weight_j[i_j]).mean()
 
 			loss = loss + li + lj
 
