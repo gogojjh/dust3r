@@ -322,9 +322,9 @@ class BasePCOptimizer (nn.Module):
 					# if torch.isnan(li).any(): li = torch.tensor(0)
 					# lj = (self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j]) + reg_j[mask_j]).mean()
 					# if torch.isnan(lj).any(): lj = torch.tensor(0)
-					li = (self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i])).mean()
+					li = (self.dist(res_i, zeros_NM3, weight=self.weight_i[i_j])[mask_i]).mean()
 					if torch.isnan(li).any(): li = torch.tensor(0)
-					lj = (self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j])).mean()
+					lj = (self.dist(res_j, zeros_NM3, weight=self.weight_j[i_j])[mask_j]).mean()
 					if torch.isnan(lj).any(): lj = torch.tensor(0)				
 				else:
 					li = self.dist(res_i, zeros_NM3, weight=self.weight_i[i_j]).mean()
