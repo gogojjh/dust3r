@@ -113,7 +113,7 @@ def init_from_pts3d(self, pts3d, im_focals, im_poses):
         img_pts3d *= s_factor
 
     # init all image poses
-    if self.has_im_poses:
+    if self.has_im_poses: # default: True
         for i in range(self.n_imgs):
             cam2world = im_poses[i]
             depth = geotrf(inv(cam2world), pts3d[i])[..., 2]
@@ -124,6 +124,7 @@ def init_from_pts3d(self, pts3d, im_focals, im_poses):
 
     if self.verbose:
         print(' init loss =', float(self()))
+
 
 def minimum_spanning_tree(imshapes, edges, pred_i, pred_j, conf_i, conf_j, im_conf, min_conf_thr,
                           device, has_im_poses=True, niter_PnP=10, verbose=True):

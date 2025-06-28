@@ -41,7 +41,7 @@ class ModularPointCloudOptimizer (BasePCOptimizer):
         for idx, pose in zip(self._get_msk_indices(pose_msk), known_poses):
             if self.verbose:
                 print(f' (setting pose #{idx} = {pose[:3,3]})')
-            self._no_grad(self._set_pose(self.im_poses, idx, torch.tensor(pose), force=True))
+                self._no_grad(self._set_pose(self.im_poses, idx, torch.tensor(pose), force=True))
 
         # NOTE(gogojjh):
         # norm_pw_scale = True if there's >= 1 known pose
