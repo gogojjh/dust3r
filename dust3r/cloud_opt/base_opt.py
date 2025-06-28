@@ -282,13 +282,13 @@ class BasePCOptimizer (nn.Module):
 			details = -torch.ones((self.n_imgs, self.n_imgs))
 
 		zeros_NM3 = torch.zeros_like(proj_pts3d[0])
-		ones_NM3  = torch.ones_like(proj_pts3d[0])
+		# ones_NM3  = torch.ones_like(proj_pts3d[0])
 
 		for e, (i, j) in enumerate(self.edges):
 			i_j = edge_str(i, j)
 			if self.calib_params is None:
 				self.weight_i[i_j] = self.conf_trf(self.conf_i[i_j])
-				self.weight_j[i_j] = self.conf_trf(self.conf_j[i_j])				
+				self.weight_j[i_j] = self.conf_trf(self.conf_j[i_j])
 				aligned_pred_i = geotrf(pw_poses[e], pw_adapt[e] * self.pred_i[i_j]) # predicted point of view_i in view_i in the global coordinate
 				aligned_pred_j = geotrf(pw_poses[e], pw_adapt[e] * self.pred_j[i_j]) # predicted point of view_j in view_i in the global coordinate
 				li = self.dist(proj_pts3d[i], aligned_pred_i, weight=self.weight_i[i_j]).mean()
@@ -323,9 +323,11 @@ class BasePCOptimizer (nn.Module):
 					# lj = (self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j]) + reg_j[mask_j]).mean()
 					# if torch.isnan(lj).any(): lj = torch.tensor(0)
 					li = (self.dist(res_i, zeros_NM3, weight=self.weight_i[i_j])[mask_i]).mean()
-					if torch.isnan(li).any(): li = torch.tensor(0)
+					if torch.isnan(li).any():
+						li = li.clone().detach().fill_(0.0).requires_grad_(True)
 					lj = (self.dist(res_j, zeros_NM3, weight=self.weight_j[i_j])[mask_j]).mean()
-					if torch.isnan(lj).any(): lj = torch.tensor(0)				
+					if torch.isnan(lj).any():
+						lj = lj.clone().detach().fill_(0.0).requires_grad_(True)
 				else:
 					li = self.dist(res_i, zeros_NM3, weight=self.weight_i[i_j]).mean()
 					lj = self.dist(res_j, zeros_NM3, weight=self.weight_j[i_j]).mean()

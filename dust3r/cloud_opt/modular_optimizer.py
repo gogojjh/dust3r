@@ -43,7 +43,9 @@ class ModularPointCloudOptimizer (BasePCOptimizer):
                 print(f' (setting pose #{idx} = {pose[:3,3]})')
             self._no_grad(self._set_pose(self.im_poses, idx, torch.tensor(pose), force=True))
 
-        # normalize scale if there's less than 1 known pose
+        # NOTE(gogojjh):
+        # norm_pw_scale = True if there's >= 1 known pose
+        # norm_pw_scale = False if there's > 1 known pose
         n_known_poses = sum((p.requires_grad is False) for p in self.im_poses)
         self.norm_pw_scale = (n_known_poses <= 1)
 
