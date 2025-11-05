@@ -114,14 +114,12 @@ class BasePCOptimizer (nn.Module):
 										  for n, ij in enumerate(self.str_edges)})
 		self.weight_j = nn.ParameterDict({ij: nn.Parameter(torch.ones_like(pred2_conf[n]), requires_grad=False) 
 										  for n, ij in enumerate(self.str_edges)})        
-		self.USE_ALT_OPT = False
 		self.loss_log = []
 		if self.calib_params is not None:
 			self.MU = self.calib_params['mu']
 			self.CONF_THRE = self.calib_params['conf_thre']
 			self.PSEUDO_GT_THRE = self.calib_params['pseudo_gt_thre']
-			self.USE_WEIGHT_OPT = self.calib_params['use_weight_opt'] # default: False
-			self.USE_ALT_OPT = self.calib_params['use_alt_opt'] # default: False
+			self.USE_WEIGHT_OPT = self.calib_params['use_weight_opt']
 
 	@property
 	def n_edges(self):
@@ -282,7 +280,6 @@ class BasePCOptimizer (nn.Module):
 			details = -torch.ones((self.n_imgs, self.n_imgs))
 
 		zeros_NM3 = torch.zeros_like(proj_pts3d[0])
-		# ones_NM3  = torch.ones_like(proj_pts3d[0])
 
 		for e, (i, j) in enumerate(self.edges):
 			i_j = edge_str(i, j)
@@ -308,13 +305,11 @@ class BasePCOptimizer (nn.Module):
 				# Compute weights using the calibrated confidence and residual norms
 				self.weight_i[i_j] = C_i / (1 + res_i_norm / self.MU) ** 2
 				self.weight_j[i_j] = C_j / (1 + res_j_norm / self.MU) ** 2
-				# print(f"weight_i max: {self.weight_i[i_j].max():.6f}, min: {self.weight_i[i_j].min():.6f}")
-				# print(f"weight_j max: {self.weight_j[i_j].max():.6f}, min: {self.weight_j[i_j].min():.6f}")
-				if self.USE_WEIGHT_OPT:
+				if self.USE_WEIGHT_OPT: # default: True
 					# set mask to inliers with high confidence
 					mask_i = self.weight_i[i_j] > self.CONF_THRE
 					mask_j = self.weight_j[i_j] > self.CONF_THRE
-					# Regularization term (μ*(√w_p - √C_p)^2)
+					# NOTE(gogojjh): Regularization term (μ*(√w_p - √C_p)^2) is not used for now
 					# reg_i = self.MU * (torch.sqrt(self.weight_i[i_j]) - torch.sqrt(C_i))**2
 					# reg_j = self.MU * (torch.sqrt(self.weight_j[i_j]) - torch.sqrt(C_j))**2
 					# # Avoid zero masked element to cause NaN
@@ -322,15 +317,15 @@ class BasePCOptimizer (nn.Module):
 					# if torch.isnan(li).any(): li = torch.tensor(0)
 					# lj = (self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j]) + reg_j[mask_j]).mean()
 					# if torch.isnan(lj).any(): lj = torch.tensor(0)
-					li = (self.dist(res_i, zeros_NM3, weight=self.weight_i[i_j])[mask_i]).mean()
+					li = (self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i])).mean()
 					if torch.isnan(li).any():
 						li = li.clone().detach().fill_(0.0).requires_grad_(True)
-					lj = (self.dist(res_j, zeros_NM3, weight=self.weight_j[i_j])[mask_j]).mean()
+					lj = (self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j])).mean()
 					if torch.isnan(lj).any():
 						lj = lj.clone().detach().fill_(0.0).requires_grad_(True)
 				else:
-					li = self.dist(res_i, zeros_NM3, weight=self.weight_i[i_j]).mean()
-					lj = self.dist(res_j, zeros_NM3, weight=self.weight_j[i_j]).mean()
+					li = self.dist(proj_pts3d[i], aligned_pred_i, weight=C_i).mean()
+					lj = self.dist(proj_pts3d[j], aligned_pred_j, weight=C_j).mean()
 
 			loss = loss + li + lj
 
@@ -396,7 +391,7 @@ class BasePCOptimizer (nn.Module):
 
 def global_alignment_loop(net, lr=0.01, niter=300, schedule='cosine', lr_min=1e-6):
 	"""
-	Performs global alignment optimization loop.
+	Performs global alignment optimization loop
 
 	Args:
 		net (nn.Module): The neural network model.
@@ -413,6 +408,7 @@ def global_alignment_loop(net, lr=0.01, niter=300, schedule='cosine', lr_min=1e-
 		return net
 
 	verbose = net.verbose
+	
 	if verbose:
 		print('Global alignment - optimizing for:')
 		print([name for name, value in net.named_parameters() if value.requires_grad])
@@ -431,96 +427,6 @@ def global_alignment_loop(net, lr=0.01, niter=300, schedule='cosine', lr_min=1e-
 		for n in range(niter):
 			loss, _ = global_alignment_iter(net, n, niter, lr_base, lr_min, optimizer, schedule)
 	return loss
-
-# NOTE(gogojjh): alternative optimization for depthmap and other parameters
-# def global_alignment_loop(net, lr=0.01, niter=300, schedule='cosine', lr_min=1e-6, alt_interval=10):
-# 	# Parameters to be optimized:
-# 	# pw_poses pw_adaptors pred_i pred_j conf_i conf_j im_conf weight_i weight_j
-# 	# im_depthmaps im_poses im_focals im_pp
-# 	# print('All parameters: ' + ' '.join(name for name, _ in net.named_parameters()))
-# 	net.loss_log = []
-
-# 	params = [p for p in net.parameters() if p.requires_grad]
-# 	if not params:
-# 		return net
-
-# 	verbose = net.verbose
-# 	use_alt = getattr(net, 'USE_ALT_OPT', False)
-
-# 	if verbose:
-# 		if use_alt:
-# 			print('Global alignment - alternating optimization (depthmap vs others):')
-# 		else:
-# 			print('Global alignment - standard optimization:')
-# 		print([name for name, value in net.named_parameters() if value.requires_grad])
-
-# 	loss = float('inf')
-
-# 	if not use_alt:
-# 		optimizer = torch.optim.Adam(params, lr=lr, betas=(0.9, 0.9))
-# 		if verbose:
-# 			with tqdm.tqdm(total=niter) as bar:
-# 				while bar.n < bar.total:
-# 					loss, lr = global_alignment_iter(net, bar.n, niter, lr, lr_min, optimizer, schedule)
-# 					net.loss_log.append((bar.n, float(loss)))
-# 					bar.set_postfix_str(f'{lr=:g} loss={loss:g}')
-# 					bar.update()
-# 		else:
-# 			for n in range(niter):
-# 				loss, _ = global_alignment_iter(net, n, niter, lr, lr_min, optimizer, schedule)
-# 				net.loss_log.append((n, float(loss)))
-# 	else:
-# 		params_group0, params_group1 = [], []
-# 		for name, param in net.named_parameters():
-# 			if not param.requires_grad:
-# 				continue
-# 			if 'im_depthmaps' in name:
-# 				params_group0.append(param)
-# 			else:
-# 				params_group1.append(param)
-
-# 		if verbose:
-# 			with tqdm.tqdm(total=niter) as bar:
-# 				while bar.n < bar.total:
-# 					if (bar.n // alt_interval) % 2 == 0:
-# 						# Optimize params_group1
-# 						for p in params_group0:
-# 							p.requires_grad = False
-# 						for p in params_group1:
-# 							p.requires_grad = True
-# 						opt = torch.optim.Adam([p for p in params_group1 if p.requires_grad], lr=lr)
-# 					else:
-# 						# Optimize params_group0
-# 						for p in params_group0:
-# 							p.requires_grad = True
-# 						for p in params_group1:
-# 							p.requires_grad = False
-# 						opt = torch.optim.Adam([p for p in params_group0 if p.requires_grad], lr=lr)
-
-# 					loss, lr = global_alignment_iter(net, bar.n, niter, lr, lr_min, opt, schedule)
-# 					net.loss_log.append((bar.n, float(loss)))
-# 					bar.set_postfix_str(f'{lr=:g} loss={loss:g}')
-# 					bar.update()
-# 		else:
-# 			for n in range(niter):
-# 				if (n // alt_interval) % 2 == 0:
-# 					for p in params_group0:
-# 						p.requires_grad = False
-# 					for p in params_group1:
-# 						p.requires_grad = True
-# 					opt = torch.optim.Adam([p for p in params_group1 if p.requires_grad], lr=lr)
-# 				else:
-# 					for p in params_group0:
-# 						p.requires_grad = True
-# 					for p in params_group1:
-# 						p.requires_grad = False
-# 					opt = torch.optim.Adam([p for p in params_group0 if p.requires_grad], lr=lr)
-
-# 				loss, _ = global_alignment_iter(net, n, niter, lr, lr_min, opt, schedule)
-# 				net.loss_log.append((n, float(loss)))
-
-# 	return loss
-
 
 def global_alignment_iter(net, cur_iter, niter, lr_base, lr_min, optimizer, schedule):
 	"""
