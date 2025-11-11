@@ -118,8 +118,13 @@ class BasePCOptimizer (nn.Module):
 		if self.calib_params is not None:
 			self.MU = self.calib_params['mu']
 			self.CONF_THRE = self.calib_params['conf_thre']
-			self.PSEUDO_GT_THRE = self.calib_params['pseudo_gt_thre']
 			self.USE_WEIGHT_OPT = self.calib_params['use_weight_opt']
+			# Acceleration parameters for the optimization
+			self.WARMUP_ITERS = self.calib_params.get('warmup_iters', 150)  # Use static weights initially
+			self.WEIGHT_UPDATE_FREQ = self.calib_params.get('weight_update_freq', 10)  # Update weights every N iters
+			self.USE_SOFT_MASK = self.calib_params.get('use_soft_mask', True)  # Smooth masking instead of hard threshold
+			self.CACHE_NORMS = self.calib_params.get('cache_norms', True)  # Cache norm computations
+			self.iteration_counter = 0
 
 	@property
 	def n_edges(self):
@@ -291,38 +296,51 @@ class BasePCOptimizer (nn.Module):
 				li = self.dist(proj_pts3d[i], aligned_pred_i, weight=self.weight_i[i_j]).mean()
 				lj = self.dist(proj_pts3d[j], aligned_pred_j, weight=self.weight_j[i_j]).mean()
 			else:				
-				# set mask to inliers with high confidence
 				C_i = self.conf_trf(self.conf_i[i_j])
 				C_j = self.conf_trf(self.conf_j[i_j])
-				# compute pixel weights with calibration
 				aligned_pred_i = geotrf(pw_poses[e], pw_adapt[e] * self.pred_i[i_j]) # predicted point in the global coordinate
 				aligned_pred_j = geotrf(pw_poses[e], pw_adapt[e] * self.pred_j[i_j])
 				res_i = proj_pts3d[i] - aligned_pred_i
 				res_j = proj_pts3d[j] - aligned_pred_j
-				# Compute the norm of residuals (L2 norm across the last dimension)
-				res_i_norm = torch.norm(res_i, dim=-1)  # Shape: (512, 288)
-				res_j_norm = torch.norm(res_j, dim=-1)  # Shape: (512, 288)
-				# Compute weights using the calibrated confidence and residual norms
-				self.weight_i[i_j] = C_i / (1 + res_i_norm / self.MU) ** 2
-				self.weight_j[i_j] = C_j / (1 + res_j_norm / self.MU) ** 2
+				
+				# Warmup with static weights
+				if self.iteration_counter < self.WARMUP_ITERS:
+					self.weight_i[i_j] = C_i
+					self.weight_j[i_j] = C_j
+				# Sparse weight updates
+				elif self.iteration_counter % self.WEIGHT_UPDATE_FREQ == 0:
+					if self.CACHE_NORMS:
+						res_i_norm = torch.sum(res_i ** 2, dim=-1).sqrt()
+						res_j_norm = torch.sum(res_j ** 2, dim=-1).sqrt()
+					else:
+						res_i_norm = torch.norm(res_i, dim=-1)
+						res_j_norm = torch.norm(res_j, dim=-1)
+					
+					eps = 1e-8
+					self.weight_i[i_j] = C_i / ((1 + res_i_norm / (self.MU + eps)) ** 2 + eps)
+					self.weight_j[i_j] = C_j / ((1 + res_j_norm / (self.MU + eps)) ** 2 + eps)
+				
 				if self.USE_WEIGHT_OPT: # default: True
-					# set mask to inliers with high confidence
-					mask_i = self.weight_i[i_j] > self.CONF_THRE
-					mask_j = self.weight_j[i_j] > self.CONF_THRE
-					# NOTE(gogojjh): Regularization term (μ*(√w_p - √C_p)^2) is not used for now
-					# reg_i = self.MU * (torch.sqrt(self.weight_i[i_j]) - torch.sqrt(C_i))**2
-					# reg_j = self.MU * (torch.sqrt(self.weight_j[i_j]) - torch.sqrt(C_j))**2
-					# # Avoid zero masked element to cause NaN
-					# li = (self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i]) + reg_i[mask_i]).mean()
-					# if torch.isnan(li).any(): li = torch.tensor(0)
-					# lj = (self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j]) + reg_j[mask_j]).mean()
-					# if torch.isnan(lj).any(): lj = torch.tensor(0)
-					li = (self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i])).mean()
-					if torch.isnan(li).any():
-						li = li.clone().detach().fill_(0.0).requires_grad_(True)
-					lj = (self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j])).mean()
-					if torch.isnan(lj).any():
-						lj = lj.clone().detach().fill_(0.0).requires_grad_(True)
+					# Soft masking instead of hard threshold
+					if self.USE_SOFT_MASK:
+						sharpness = 10.0
+						soft_mask_i = torch.sigmoid(sharpness * (self.weight_i[i_j] - self.CONF_THRE))
+						soft_mask_j = torch.sigmoid(sharpness * (self.weight_j[i_j] - self.CONF_THRE))					
+						effective_weight_i = self.weight_i[i_j] * soft_mask_i
+						effective_weight_j = self.weight_j[i_j] * soft_mask_j
+						li = self.dist(res_i, zeros_NM3, weight=effective_weight_i).mean()
+						lj = self.dist(res_j, zeros_NM3, weight=effective_weight_j).mean()
+					else:
+						mask_i = self.weight_i[i_j] > self.CONF_THRE
+						mask_j = self.weight_j[i_j] > self.CONF_THRE
+						if mask_i.any():
+							li = self.dist(res_i[mask_i], zeros_NM3[mask_i], weight=self.weight_i[i_j][mask_i]).mean()
+						else:
+							li = torch.zeros(1, device=res_i.device, requires_grad=True)					
+						if mask_j.any():
+							lj = self.dist(res_j[mask_j], zeros_NM3[mask_j], weight=self.weight_j[i_j][mask_j]).mean()
+						else:
+							lj = torch.zeros(1, device=res_j.device, requires_grad=True)
 				else:
 					li = self.dist(proj_pts3d[i], aligned_pred_i, weight=C_i).mean()
 					lj = self.dist(proj_pts3d[j], aligned_pred_j, weight=C_j).mean()
@@ -333,6 +351,10 @@ class BasePCOptimizer (nn.Module):
 				details[i, j] = li + lj
 
 		loss /= self.n_edges  # average over all pairs
+		
+		# Increment iteration counter (for calibration mode)
+		if self.calib_params is not None:
+			self.iteration_counter += 1
 
 		if ret_details:
 			return loss, details
@@ -457,6 +479,10 @@ def global_alignment_iter(net, cur_iter, niter, lr_base, lr_min, optimizer, sche
 	loss = net()
 	loss.backward()
 	optimizer.step()
+
+	# Track loss for visualization/analysis
+	if hasattr(net, 'loss_log'):
+		net.loss_log.append(float(loss))
 
 	return float(loss), lr
 
