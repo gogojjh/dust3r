@@ -120,9 +120,9 @@ class BasePCOptimizer (nn.Module):
 			self.CONF_THRE = self.calib_params['conf_thre']
 			self.USE_WEIGHT_OPT = self.calib_params['use_weight_opt']
 			# Acceleration parameters for the optimization
-			self.WARMUP_ITERS = self.calib_params.get('warmup_iters', 150)  # Use static weights initially
-			self.WEIGHT_UPDATE_FREQ = self.calib_params.get('weight_update_freq', 10)  # Update weights every N iters
-			self.USE_SOFT_MASK = self.calib_params.get('use_soft_mask', True)  # Smooth masking instead of hard threshold
+			self.WARMUP_ITERS = self.calib_params.get('warmup_iters', 50)  # Use static weights initially
+			self.WEIGHT_UPDATE_FREQ = self.calib_params.get('weight_update_freq', 5)  # Update weights every N iters
+			self.USE_SOFT_MASK = self.calib_params.get('use_soft_mask', False)  # Smooth masking instead of hard threshold
 			self.CACHE_NORMS = self.calib_params.get('cache_norms', True)  # Cache norm computations
 			self.iteration_counter = 0
 
