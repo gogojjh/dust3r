@@ -34,7 +34,7 @@ from dust3r.inference import loss_of_one_batch  # noqa
 import dust3r.utils.path_to_croco  # noqa: F401
 import croco.utils.misc as misc  # noqa
 from croco.utils.misc import NativeScalerWithGradNormCount as NativeScaler  # noqa
-
+from dust3r.lora import inject_lora
 
 def get_args_parser():
     parser = argparse.ArgumentParser('DUST3R training', add_help=False)
@@ -131,6 +131,20 @@ def train(args):
     print(f'>> Creating test criterion = {args.test_criterion or args.train_criterion}')
     test_criterion = eval(args.test_criterion or args.criterion).to(device)
 
+    ######################################### NOTE(gogojjh): inject LoRA layer
+    for name, layer in model.named_modules():
+        # Retrieve all linear layer in cross attention
+        # For each linear layer, change y=WX to y=WX + WaWbX
+        if any(n in name.split('.') for n in ['qkv']) and isinstance(layer, nn.Linear):
+            inject_lora(model, name, layer)
+
+    for name, param in model.named_parameters():
+        if name.split('.')[-1] not in ['lora_a','lora_b']: # Not compute gradient for non-LoRA part
+            param.requires_grad = False
+        else:
+            param.requires_grad = True
+    #########################################  
+
     model.to(device)
     model_without_ddp = model
     print("Model = %s" % str(model_without_ddp))
@@ -190,13 +204,21 @@ def train(args):
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     train_stats = test_stats = {}
-    for epoch in range(args.start_epoch, args.epochs + 1):
 
+    for epoch in range(args.start_epoch, args.epochs + 1):
         # Save immediately the last checkpoint
         if epoch > args.start_epoch:
             if args.save_freq and epoch % args.save_freq == 0 or epoch == args.epochs:
                 save_model(epoch - 1, 'last', best_so_far)
-
+                
+                ######################################### NOTE(gogojjh): Store LoRA weights
+                lora_state = {}
+                for name, param in model_without_ddp.named_parameters():
+                    if any(n == name.split('.')[-1] for n in ['lora_a', 'lora_b']):
+                        lora_state[name] = param
+                torch.save(lora_state, os.path.join(args.output_dir, 'lora.pt'))
+                #########################################
+                
         # Test on multiple datasets
         new_best = False
         if (epoch > 0 and args.eval_freq > 0 and epoch % args.eval_freq == 0):

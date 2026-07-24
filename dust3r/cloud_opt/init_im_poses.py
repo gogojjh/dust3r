@@ -89,6 +89,7 @@ def init_from_pts3d(self, pts3d, im_focals, im_poses):
         raise NotImplementedError("Would be simpler to just align everything afterwards on the single known pose")
     elif nkp > 1:
         # global rigid SE3 alignment
+        # NOTE(gogojjh): initialize the scale of the poses
         s, R, T = align_multiple_poses(im_poses[known_poses_msk], known_poses[known_poses_msk])
         trf = sRT_to_4x4(s, R, T, device=known_poses.device)
 
@@ -97,7 +98,7 @@ def init_from_pts3d(self, pts3d, im_focals, im_poses):
         im_poses[:, :3, :3] /= s  # undo scaling on the rotation part
         for img_pts3d in pts3d:
             img_pts3d[:] = geotrf(trf, img_pts3d)
-
+    
     # set all pairwise poses
     for e, (i, j) in enumerate(self.edges):
         i_j = edge_str(i, j)
@@ -112,7 +113,7 @@ def init_from_pts3d(self, pts3d, im_focals, im_poses):
         img_pts3d *= s_factor
 
     # init all image poses
-    if self.has_im_poses:
+    if self.has_im_poses: # default: True
         for i in range(self.n_imgs):
             cam2world = im_poses[i]
             depth = geotrf(inv(cam2world), pts3d[i])[..., 2]
@@ -138,7 +139,8 @@ def minimum_spanning_tree(imshapes, edges, pred_i, pred_j, conf_i, conf_j, im_co
     im_poses = [None] * n_imgs
     im_focals = [None] * n_imgs
 
-    # init with strongest edge
+    # NOTE(gogojjh):
+    # init with strongest edge and set it as the world coordinate
     score, i, j = todo.pop()
     if verbose:
         print(f' init edge ({i}*,{j}*) {score=}')

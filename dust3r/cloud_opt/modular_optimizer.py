@@ -21,10 +21,11 @@ class ModularPointCloudOptimizer (BasePCOptimizer):
     Graph edges: observations = (pred1, pred2)
     """
 
-    def __init__(self, *args, optimize_pp=False, fx_and_fy=False, focal_brake=20, **kwargs):
+    def __init__(self, *args, optimize_pp=False, fx_and_fy=False, focal_brake=20, calib_params=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.has_im_poses = True  # by definition of this class
         self.focal_brake = focal_brake
+        self.calib_params = calib_params
 
         # adding thing to optimize
         self.im_depthmaps = nn.ParameterList(torch.randn(H, W)/10-3 for H, W in self.imshapes)  # log(depth)
@@ -40,10 +41,12 @@ class ModularPointCloudOptimizer (BasePCOptimizer):
             known_poses = [known_poses]
         for idx, pose in zip(self._get_msk_indices(pose_msk), known_poses):
             if self.verbose:
-                print(f' (setting pose #{idx} = {pose[:3,3]})')
-            self._no_grad(self._set_pose(self.im_poses, idx, torch.tensor(pose), force=True))
+                print(f' (setting pose #{idx} = {pose[:3,3]}) [initialized (optimizable)]')
+            pose_param = self._set_pose(self.im_poses, idx, torch.tensor(pose), force=True)
+            self._no_grad(pose_param)
 
-        # normalize scale if there's less than 1 known pose
+        # NOTE(gogojjh): norm_pw_scale = True if there's >= 1 known pose
+        # NOTE(gogojjh): norm_pw_scale = False if there's > 1 known pose
         n_known_poses = sum((p.requires_grad is False) for p in self.im_poses)
         self.norm_pw_scale = (n_known_poses <= 1)
 

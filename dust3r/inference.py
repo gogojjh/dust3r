@@ -47,7 +47,7 @@ def loss_of_one_batch(batch, model, criterion, device, symmetrize_batch=False, u
         # loss is supposed to be symmetric
         with torch.cuda.amp.autocast(enabled=False):
             loss = criterion(view1, view2, pred1, pred2) if criterion is not None else None
-
+            
     result = dict(view1=view1, view2=view2, pred1=pred1, pred2=pred2, loss=loss)
     return result[ret] if ret else result
 

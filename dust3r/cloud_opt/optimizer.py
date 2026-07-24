@@ -187,11 +187,11 @@ class PointCloudOptimizer(BasePCOptimizer):
 
     def forward(self):
         pw_poses = self.get_pw_poses()  # cam-to-world
-        pw_adapt = self.get_adaptors().unsqueeze(1)
-        proj_pts3d = self.get_pts3d(raw=True)
+        pw_adapt = self.get_adaptors().unsqueeze(1) # scale
+        proj_pts3d = self.get_pts3d(raw=True)                              # optimized point in the global coordinate
 
         # rotate pairwise prediction according to pw_poses
-        aligned_pred_i = geotrf(pw_poses, pw_adapt * self._stacked_pred_i)
+        aligned_pred_i = geotrf(pw_poses, pw_adapt * self._stacked_pred_i) # predicted point in the global coordinate
         aligned_pred_j = geotrf(pw_poses, pw_adapt * self._stacked_pred_j)
 
         # compute the less
