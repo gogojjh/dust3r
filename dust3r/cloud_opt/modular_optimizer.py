@@ -21,10 +21,11 @@ class ModularPointCloudOptimizer (BasePCOptimizer):
     Graph edges: observations = (pred1, pred2)
     """
 
-    def __init__(self, *args, optimize_pp=False, fx_and_fy=False, focal_brake=20, **kwargs):
+    def __init__(self, *args, optimize_pp=False, fx_and_fy=False, focal_brake=20, calib_params=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.has_im_poses = True  # by definition of this class
         self.focal_brake = focal_brake
+        self.calib_params = calib_params
 
         # adding thing to optimize
         self.im_depthmaps = nn.ParameterList(torch.randn(H, W)/10-3 for H, W in self.imshapes)  # log(depth)
