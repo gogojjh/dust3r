@@ -1,7 +1,9 @@
 
-## Fine-tune Dust3R using [LoRA (Low-Rank Adaptation)](https://arxiv.org/abs/2106.09685) and [LoRA3D](https://openreview.net/forum?id=LSp4KBhAom)
-Please check [README.md](test_lora/README.md) for the instruction (switch ```lora_finetune``` branch)
-
+## Differences from upstream ([naver/dust3r](https://github.com/naver/dust3r))
+This fork (`gogojjh/dust3r`) tracks upstream `main` and adds:
+- **Python 3.8 compatibility**: `functools.cache` (Python 3.9+ only) is conditionally replaced with `functools.lru_cache(maxsize=None)` on Python < 3.9 (`dust3r/cloud_opt/init_im_poses.py`).
+- **Calibrated confidence map in global alignment**: `BasePCOptimizer` / `ModularPointCloudOptimizer` (`dust3r/cloud_opt/base_opt.py`, `dust3r/cloud_opt/modular_optimizer.py`) accept an optional `calib_params` dict (`mu`, `conf_thre`, `use_weight_opt`, `warmup_iters`, `weight_update_freq`, `use_soft_mask`, `cache_norms`) to reweight per-pixel confidence during optimization.
+- **LoRA fine-tuning**: [LoRA](https://arxiv.org/abs/2106.09685)/[LoRA3D](https://openreview.net/forum?id=LSp4KBhAom) fine-tuning utilities built on top of the calibrated confidence map (`dust3r/lora.py`, `test_lora/README.md`).
 
 ---
 ![demo](assets/dust3r.jpg)
