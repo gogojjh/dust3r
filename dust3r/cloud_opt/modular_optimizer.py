@@ -22,7 +22,7 @@ class ModularPointCloudOptimizer (BasePCOptimizer):
     """
 
     def __init__(self, *args, optimize_pp=False, fx_and_fy=False, focal_brake=20, calib_params=None, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, calib_params=calib_params, **kwargs)
         self.has_im_poses = True  # by definition of this class
         self.focal_brake = focal_brake
         self.calib_params = calib_params
